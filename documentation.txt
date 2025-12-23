@@ -1,0 +1,789 @@
+1. Problem You’re Solving (Clear Definition)
+
+	You are building a real-time collaborative plain-text editor where:
+
+	Multiple users edit the same document concurrently
+
+	Clients can disconnect, lag, retry, or crash
+
+	The system must always converge to one correct document
+
+	This is a distributed systems problem, not a frontend problem.
+
+2. Core Rule (Non-Negotiable)
+Server holds absolute truth
+
+	That means:
+
+		Server owns the authoritative document state
+
+		Server owns the authoritative operation order
+
+		Client state is disposable and eventually consistent
+
+		Clients are allowed to:
+
+			Drift
+
+			Lie
+
+			Go offline
+
+			Replay requests
+
+	The system must still work.
+
+3. Client Model (What Clients Actually Do)
+
+	Each client has:
+
+		A local copy of the document at some version
+
+		A queue of optimistic local edits (pending ops)
+
+		No authority over final document state
+
+	Clients:
+
+		Apply edits locally for responsiveness
+
+		Send operations to the server
+
+		Accept server corrections without argument
+
+4. Operation Model (This Is Critical)
+
+	Clients do not send document diffs or files.
+	They send operations.
+
+	Each operation contains:
+
+		operationId (globally unique, for deduplication)
+
+		userId
+
+		baseVersion (document version the client edited against)
+
+		operationType (insert / delete / replace)
+	
+		position (character offset, not line/word)
+
+		payload (text or length)
+
+	Clients do not send:
+
+		Success flags
+
+		Updated versions
+
+		Final positions (those are not trusted)
+
+5. Server Processing Flow (Authoritative Pipeline)
+
+	For every incoming operation:
+
+		Authenticate user
+
+		Check write permission
+
+		Check operationId
+
+		If duplicate → discard (idempotency)
+
+		Check baseVersion
+
+		If stale → transform the operation, not the document
+
+		Apply operation to authoritative document
+
+		Increment documentVersion
+
+		Assign serverSequenceId
+
+		Persist changes
+
+		Broadcast operation to other clients
+
+		Acknowledge sender
+
+	Important:
+
+		Server never mutates history
+
+		Server never trusts client position
+
+		Server never rewinds state
+
+6. Version vs Sequence (You Must Not Mix These)
+DocumentVersion
+
+	Represents document state
+
+	Increments after each applied operation
+
+	Used to detect staleness
+
+	ServerSequenceId
+
+	Represents global ordering
+
+	Strictly increasing
+
+	Used for replay, buffering, and recovery
+
+	They serve different purposes.
+
+7. Persistence Model (Crash Survival Logic)
+	Must be persisted
+
+		If you lose these, your system is broken:
+
+		Authoritative document content (or snapshots)
+
+		DocumentVersion
+
+		Operation log (ordered by serverSequenceId)
+
+		OperationId registry (deduplication)
+
+		Access control rules
+
+	In-memory only
+
+		Safe to lose:
+
+			Connected clients
+
+			Pending ops per client
+
+			Presence info
+
+			Cursor data
+
+			Temporary buffers
+
+	Rule:
+
+		If the server crashes right now, what must survive?
+
+		That decides persistence.
+
+8. Why Snapshots Exist (And What They Really Are)
+
+	A snapshot is:
+
+		The entire document state
+
+		At a specific documentVersion
+
+		At a specific serverSequenceId
+
+	Snapshots solve:
+
+		Fast client joins
+
+		Crash recovery
+
+		Infinite log growth
+
+	Snapshots are not optional for real systems.
+
+9. New Client Join Protocol (Correct Flow)
+Server → Client
+
+	Snapshot content
+
+		snapshotVersion
+
+		snapshotSequenceId
+
+	Server immediately:
+
+		Starts buffering new operations for that client
+
+	Client
+
+		Applies snapshot
+
+		Sets local version = snapshotVersion
+
+		Does NOT apply live ops yet
+
+		Client → Server
+
+		Lightweight acknowledgment: snapshotSequenceId applied
+
+	Server → Client
+
+		Sends all ops where
+		serverSequenceId > snapshotSequenceId
+
+		Switches client to live broadcast stream
+
+	Guarantee:
+
+		Client never applies an op with sequenceId ≤ snapshotSequenceId
+
+10. What Happens During Snapshot Apply
+
+	Operations may continue on the server
+
+	Server buffers them per client
+
+	Client catches up after snapshot is applied
+
+	Ordering is preserved by serverSequenceId
+
+	No document comparison is needed.
+
+11. Failure Assumptions (Built Into Design)
+
+	Your system already assumes:
+
+		Network failures
+
+		Duplicate requests
+
+		Out-of-order delivery
+
+		Client crashes
+
+		Temporary divergence
+
+		And still converges.
+
+	That means your design is correctly paranoid.
+
+SUMMARY:
+
+The server is the single source of truth for document state and operation order.
+Clients maintain local optimistic state but must always converge to the server state.
+
+Clients send edit operations containing an operationId, userId, baseVersion, operation type, position, and payload.
+The server authenticates and authorizes the request, checks for duplicate operations, rebases the operation if its baseVersion is stale, applies it to the authoritative document, assigns ordering metadata, persists it, and broadcasts it to all clients.
+
+Clients acknowledge server responses, clear pending operations, and replay server-authoritative updates to maintain consistency.
+
+
+							ARCHITECHURE DESIGN
+
+1. System Goal (Re-anchoring)
+
+	A real-time collaborative plain-text editor where:
+
+	Server is authoritative
+
+	Clients converge
+
+	Edits are ordered, durable, and replayable
+
+	System survives crashes and reconnects
+
+	Everything in the architecture serves this goal.
+
+
+
+
+							[ Client (Web/App) ]
+       								|
+        								|  WebSocket (ops, sync, acks)
+        							        v
+							[ Realtime Gateway ]
+        								|
+        								v
+							[ Collaboration Core ]
+        								|
+        								|-------------------|
+        								|                   |
+       								 v                   v
+							[ Persistence Layer ]   [ Snapshot Manager ]
+
+3. Component Breakdown (Very Important)
+	3.1 Client
+
+		Responsibilities:
+
+		Render document
+
+		Apply optimistic edits
+
+		Track pending operations
+
+		Reconcile server updates
+
+		Non-responsibilities:
+
+		Conflict resolution
+
+		Ordering
+
+		Authority
+
+		Clients are dumb but fast.
+
+	3.2 Realtime Gateway
+
+		Think of this as a traffic controller, not a brain.
+
+		Responsibilities:
+
+		Maintain WebSocket connections
+
+		Authenticate clients
+
+		Route messages to Collaboration Core
+
+		Broadcast server-approved ops
+
+	Non-responsibilities:
+
+		Document mutation
+
+		Versioning
+
+		Rebase logic
+
+	Why separate it:
+
+		Lets you scale connections independently
+
+		Keeps core logic clean
+
+	3.3 Collaboration Core (The Brain)
+
+		This is the most important component.
+
+		Responsibilities:
+
+			Validate operations
+
+			Deduplicate operationIds
+
+			Transform operations (rebasing)
+
+			Apply operations to document state
+
+			Assign serverSequenceId
+
+			Increment documentVersion
+
+			Decide broadcast order
+
+		Rules:
+
+			Single authority per document
+
+			Deterministic behavior
+
+			No side effects outside persistence
+
+			This component enforces truth.
+
+	3.4 Persistence Layer
+
+			Responsibilities:
+
+			Store authoritative document content
+
+			Store operation logs
+
+			Store snapshots
+
+			Store permissions
+
+			Store deduplication state
+
+		Characteristics:
+
+			Durable
+
+			Ordered writes
+
+			Crash-safe
+
+			No business logic here.
+
+	3.5 Snapshot Manager
+
+		Responsibilities:
+
+			Decide when to snapshot
+
+			Create snapshots from document state
+
+			Prune old operation logs
+
+			Assist new client sync
+
+		This can be:
+
+			A background worker
+
+			Or part of Collaboration Core initially
+
+			But conceptually, it is separate.
+
+4. Document Ownership Model (Crucial Decision)
+One document = one authority
+
+	For each document:
+
+		Exactly one active Collaboration Core instance owns it
+
+		All ops for that document go through it
+
+		Guarantees strict ordering
+
+	This avoids:
+
+		Cross-node conflicts
+
+		Distributed locks
+
+		Consensus nightmares
+
+		Scaling happens by:
+
+		Sharding documents, not operations
+
+5. Request / Response Flow (Edit Path)
+	Client edits
+
+		→ Sends operation via WebSocket
+
+	Realtime Gateway
+
+		→ Auth check
+		→ Forward to Collaboration Core
+
+	Collaboration Core
+
+		Deduplicate operationId
+
+		Rebase if baseVersion is stale
+
+		Apply operation
+
+		Persist
+
+		Broadcast op
+
+	Clients
+
+		→ Apply op
+		→ Clear pending optimistic state
+
+	This is your hot path. Keep it fast.
+
+6. Join / Reconnect Flow (Sync Path)
+	Client connects
+
+		→ Requests document
+
+	Server
+
+		→ Fetch snapshot
+		→ Send snapshot + metadata
+		→ Buffer new ops
+
+	Client
+
+		→ Apply snapshot
+		→ Ack snapshot
+
+	Server
+
+		→ Send buffered ops
+		→ Switch client to live stream
+
+	No races. No guessing.
+
+7. Failure Boundaries (Explicit)
+	If client crashes
+
+		Server unaffected
+
+	Client resyncs via snapshot
+
+		If server crashes
+
+	Persisted state restores
+
+		Clients reconnect and resync
+
+	If gateway crashes
+
+		Connections drop
+
+		No data corruption
+	
+	Every failure is contained.
+
+8. What This Architecture Is NOT
+
+	Not peer-to-peer
+
+	Not CRDT-based (yet)
+
+	Not git
+
+	Not multi-writer authority
+
+	It is:
+
+		Centralized authority
+
+		Deterministic
+
+		Debuggable
+
+
+	
+										SCALABLITY
+
+								How do we handle 10000 or more documents simultanously?
+
+[ Client ]
+   |
+   |  WebSocket (docId)
+   v
+[ Realtime Gateway ]
+   |
+   |  hash(docId)
+   v
+[ Document Router ]
+   |
+   v
+[ Collaboration Core Instance ]
+
+
+
+								What MUST be loaded into RAM when a document is owned
+These are non-negotiable.
+
+Load into RAM immediately
+
+Authoritative document content
+
+The actual text (string / rope / buffer)
+
+Without this, you cannot apply edits
+
+Current documentVersion
+
+Single integer
+
+Used to validate and transform operations
+
+Current serverSequenceId
+
+Last applied global sequence number
+
+Used to order new operations
+
+Recent operation window (bounded)
+
+Small in-memory buffer of recent ops
+
+Used for rebasing stale client operations
+
+Connected clients list (for this doc)
+
+Socket references, not identities
+
+Purely ephemeral
+
+If these are not in RAM, your “real-time” editor is fake.
+
+
+
+3. What must stay persisted on disk
+
+This is your durability layer.
+
+Persisted (disk / DB / storage)
+
+Snapshots
+
+Document content
+
+snapshotVersion
+
+snapshotSequenceId
+
+Operation log
+
+Ordered by serverSequenceId
+
+Append-only
+
+Document metadata
+
+documentId
+
+permissions
+
+owner info
+
+Deduplication state
+
+operationIds already applied
+
+Can be pruned, but must survive crashes
+
+
+
+What fields exist in the in-memory representation of a document owned by a collaboration core?
+
+DocumentState {
+  documentId            // identifier
+  content               // authoritative text buffer
+  version               // current document version
+  lastSequenceId        // last applied global sequence
+  recentOperations      // bounded buffer for rebasing
+  connectedClients      // ephemeral references
+}
+
+
+FLOW FOR THE COLLABORATIVE CORE
+
+Here is the correct step-by-step flow inside the Collaboration Core:
+
+Verify document write permission
+
+Check deduplication store for operationId
+
+If duplicate → discard
+
+Register operationId as seen
+
+Compare baseVersion with current documentVersion
+
+If too stale → reject or resync
+
+Transform operation using in-memory recentOperations
+
+Apply transformed operation to document content
+
+Increment documentVersion
+
+Increment serverSequenceId
+
+Persist operation (log)
+
+Append operation to recentOperations buffer
+
+Broadcast operation to connected clients
+
+Acknowledge sender with metadata
+
+If snapshot threshold reached → signal snapshot manager		
+
+
+
+PROJECT ROADMAP — REAL-TIME COLLABORATIVE EDITOR
+
+================================================
+PHASE 1 — PLATFORM & ACCESS CONTROL (FOUNDATION)
+================================================
+
+Goal:
+Establish identity, ownership, and permissions without leaking
+collaboration logic into the system.
+
+Scope:
+- User authentication (signup / login)
+- JWT-based authorization
+- User discovery (search users)
+- Document creation
+- Invite collaborators to documents
+- Read / write permission management
+- REST-based APIs only
+
+Explicitly excluded:
+- Document content storage
+- Real-time editing
+- Versioning
+- Operations
+- Snapshots
+- WebSockets
+- Concurrency handling
+
+Core rule:
+Auth decides WHO can access a document.
+It does NOT decide HOW the document changes.
+
+------------------------------------------------
+
+================================================
+PHASE 2 — COLLABORATION ENGINE (CORE SYSTEM)
+================================================
+
+Goal:
+Build a correct, server-authoritative real-time editing engine.
+
+Scope:
+- Single plain-text document per session
+- Server holds authoritative document state
+- Operation-based protocol (insert / delete / replace)
+- Operation IDs and baseVersion tracking
+- Deduplication via sliding recent-op window
+- Rebasing stale operations
+- Server-assigned document versions
+- Snapshot-based resynchronization
+- In-memory document state
+- Append-only operation logs (persistence)
+
+Explicitly excluded:
+- Rich text
+- Multiple documents per session
+- Folder structures
+- UI polish
+- Cursor synchronization
+- Presence indicators
+
+Core rule:
+Clients send INTENT (operations), not state (documents).
+Server decides reality.
+
+------------------------------------------------
+
+================================================
+PHASE 3 — HARDENING, SCALE & EXPERIENCE
+================================================
+
+Goal:
+Make the system resilient, scalable, and usable at scale.
+
+Scope:
+- WebSocket transport
+- Reconnect & resync handling
+- Out-of-order operation handling
+- Network failure simulation
+- Snapshot compaction
+- Memory pressure handling
+- Document sharding (10k+ documents)
+- Multi-instance routing
+- Latency optimization
+- Editor UX improvements
+- Cursor presence (optional)
+- Stress testing & edge cases
+
+Explicitly excluded:
+- Core collaboration logic redesign
+- Auth changes
+- Protocol rewrites
+
+Core rule:
+Scale via routing and ownership, not shared mutable state.
+
+================================================
+
+
+
+
+
+
+
+
+

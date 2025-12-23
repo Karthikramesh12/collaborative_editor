@@ -1,0 +1,20 @@
+{
+  "scripts": {
+    "gen:migration": "node scripts/generateMigration.js",
+    "gen:model": "node scripts/generateModel.js",
+    "gen:module": "node scripts/generateModule.js",
+    "dev": "nodemon src/server.js",
+    "start": "node server.js"
+  },
+  "devDependencies": {
+    "prisma": "^6.2.1"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "nodemon": "^3.1.11"
+  }
+}
