@@ -780,6 +780,70 @@ Scale via routing and ownership, not shared mutable state.
 ================================================
 
 
+backend/
+├── config/
+│   ├── dbConnect.js
+│   ├── passportConnect.js
+│   └── redisConfig.js
+
+├── prisma/
+│   ├── schema.prisma
+│   └── migrations/
+
+├── generated/
+│   └── prisma/
+
+├── scripts/
+│   ├── generateMigration.js
+│   ├── generateModel.js
+│   └── generateModule.js
+
+├── globals/
+│   ├── constants.js
+│   └── response.json
+
+├── helpers/
+│   ├── apiResponse.js
+│   └── generateToken.js
+
+├── middleware/
+│   └── verifyToken.js
+
+├── modules/                ← Phase 1 lives here
+│   ├── auth/
+│   ├── user/
+│   ├── document/
+│   │   ├── routes/
+│   │   └── services/
+│   └── collaborator/
+│       ├── routes/
+│       └── services/
+
+├── realtime/               ← Phase 2 starts here
+│   ├── gateway/
+│   │   ├── httpGateway.js
+│   │   └── wsGateway.js
+│   │
+│   ├── engine/
+│   │   ├── DocumentState.js
+│   │   ├── Operation.js
+│   │   ├── CollabEngine.js
+│   │   ├── Rebase.js
+│   │   └── Snapshot.js
+│   │
+│   ├── memory/
+│   │   ├── documentStore.js
+│   │   └── opWindow.js
+│   │
+│   └── persistence/
+│       ├── snapshotRepo.js
+│       └── opLogRepo.js
+
+├── routes/
+│   └── index.js
+
+├── server.js
+└── README.md
 
 
 
