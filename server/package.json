@@ -3,7 +3,7 @@
     "gen:migration": "node scripts/generateMigration.js",
     "gen:model": "node scripts/generateModel.js",
     "gen:module": "node scripts/generateModule.js",
-    "dev": "nodemon src/server.js",
+    "dev": "nodemon server.js",
     "start": "node server.js"
   },
   "devDependencies": {
@@ -15,6 +15,10 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "nodemon": "^3.1.11"
+    "jsonwebtoken": "^9.0.3",
+    "nodemon": "^3.1.11",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "passport-local": "^1.0.0"
   }
 }

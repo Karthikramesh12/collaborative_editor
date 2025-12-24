@@ -1,4 +1,4 @@
-const autServices = require('../services/auth.services.js');
+const auth = require('../services/auth.services.js');
 
 async function signUp (req, res) {
     try{
@@ -11,18 +11,16 @@ async function signUp (req, res) {
             });
         }
 
-        const user = await autServices.signUp(email, userName, password);
+        const user = await auth.signUp(email, password, userName);
         
         return res.status(201).json({
             success: true,
             data:{
-                userId: user.id,
-                email: user.email,
-                userName: user.userName,
+                user
             },
         });
     } catch (error){
-        if (error.message === "USER_ALREADY_EXISTS"){
+        if (error.message === "EMAIL_EXISTS"){
             return res.status(409).json({
                 success: false,
                 message: "user already exists"
@@ -48,24 +46,23 @@ async function login(req, res) {
             });
         }
 
-        const user = await autServices.login(email, password);
+        const user = await auth.login(email, password);
 
         return res.status(200).json({
             success: true,
             data:{
-                id: user.id,
-                email: user.email,
-                userName: user.userName,
+                user,
             },
         });
     } catch (error) {
-        if (error.message === "INVALID_CREDENTIALS"){
+        if (error.message === "INVALID"){
             return res.status(401).json({
                 success: false,
                 message: "invalid credentials",
             });
         }
 
+        console.error("Error in logging in: ", error);
         return res.status(500).json({
             success: false,
             message: "internal server error",

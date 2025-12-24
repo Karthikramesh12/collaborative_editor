@@ -9,35 +9,68 @@ datasource db {
 }
 
 model User {
-  id              String   @id @default(cuid())
-  email           String?  @unique
-  emailVerified   Boolean  @default(false)
-  name            String?
-  avatarUrl       String?
+  id            String   @id @default(cuid())
+  email         String?  @unique
+  emailVerified Boolean  @default(false)
+  name          String?
+  avatarUrl     String?
+  isActive      Boolean  @default(true)
 
-  isActive        Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  authProviders   AuthProvider[]
+  authProviders AuthProvider[]
+  documents     Document[] @relation("OwnedDocuments")
+  edits         Editor[]
 
   @@index([email])
 }
 
 model AuthProvider {
-  id              String   @id @default(cuid())
-  provider        AuthType
-  providerUserId  String?  // OAuth user id (Google sub, GitHub id, etc)
-  passwordHash    String?  // only for EMAIL provider
+  id             String   @id @default(cuid())
+  provider       AuthType
+  providerUserId String?
+  passwordHash   String?
 
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([provider, providerUserId])
+}
+
+model Document {
+  id      String @id @default(cuid())
+  title   String
+  ownerId String
+
+  owner User @relation("OwnedDocuments", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  editors   Editor[]
+}
+
+model Editor {
+  id         String     @id @default(cuid())
+  userId     String
+  documentId String
+  role       EditorRole
+  invitedBy  String?
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+}
+
+enum EditorRole {
+  OWNER
+  EDITOR
+  VIEWER
 }
 
 enum AuthType {
