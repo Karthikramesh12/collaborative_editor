@@ -1,0 +1,292 @@
+:root {
+  --unit-body-font-family: 'Open Sans', sans-serif;
+  --unit-heading-font-family: 'Poppins', sans-serif;
+  --unit-primary-color: #ff4a17;
+  --unit-secondary-color: #4d4d4d;
+  --unit-ternary-color: #999696;
+  --unit-body-font-color: #7a7a7a;
+  --unit-heading-font-color: #fefefe;
+  --unit-common-color-white: #fff;
+  --unit-bg-color: #000000;
+  --unit-fw-extra-bold: 800;
+  --unit-fw-bold: 700;
+  --unit-fw-semi-bold: 600;
+  --unit-fw-medium: 500;
+  --unit-fw-regular: 400;
+}
+
+.document-manager {
+  min-height: 100vh;
+  background-color: var(--unit-bg-color);
+  padding: 2rem 0;
+  font-family: var(--unit-body-font-family);
+  color: var(--unit-body-font-color);
+}
+
+.main-title {
+  font-family: var(--unit-heading-font-family);
+  color: var(--unit-heading-font-color);
+  font-weight: var(--unit-fw-bold);
+  margin-bottom: 2rem;
+  text-align: center;
+  font-size: 2.5rem;
+}
+
+.custom-card {
+  background-color: var(--unit-secondary-color);
+  border: 1px solid var(--unit-ternary-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.custom-card .card-header {
+  background-color: var(--unit-bg-color);
+  border-bottom: 2px solid var(--unit-primary-color);
+  padding: 1rem 1.25rem;
+}
+
+.custom-card .card-header h3 {
+  font-family: var(--unit-heading-font-family);
+  color: var(--unit-heading-font-color);
+  font-weight: var(--unit-fw-semi-bold);
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.custom-card .card-body {
+  padding: 1.5rem;
+}
+
+.form-label {
+  color: var(--unit-heading-font-color);
+  font-weight: var(--unit-fw-medium);
+  margin-bottom: 0.5rem;
+}
+
+.form-control,
+.form-select {
+  background-color: var(--unit-bg-color);
+  border: 1px solid var(--unit-ternary-color);
+  color: var(--unit-heading-font-color);
+  padding: 0.625rem 0.875rem;
+  border-radius: 4px;
+}
+
+.form-control:focus,
+.form-select:focus {
+  background-color: var(--unit-bg-color);
+  border-color: var(--unit-primary-color);
+  color: var(--unit-heading-font-color);
+  box-shadow: 0 0 0 0.2rem rgba(255, 74, 23, 0.25);
+}
+
+.form-control::placeholder {
+  color: var(--unit-ternary-color);
+}
+
+.btn-primary {
+  background-color: var(--unit-primary-color);
+  border-color: var(--unit-primary-color);
+  color: var(--unit-common-color-white);
+  font-weight: var(--unit-fw-semi-bold);
+  padding: 0.625rem 1.25rem;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+  background-color: #e63d0f;
+  border-color: #e63d0f;
+  box-shadow: 0 4px 8px rgba(255, 74, 23, 0.3);
+}
+
+.btn-primary:disabled {
+  background-color: var(--unit-ternary-color);
+  border-color: var(--unit-ternary-color);
+  opacity: 0.6;
+}
+
+.btn-outline-primary {
+  color: var(--unit-primary-color);
+  border-color: var(--unit-primary-color);
+  background-color: transparent;
+  font-weight: var(--unit-fw-medium);
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary:focus {
+  background-color: var(--unit-primary-color);
+  border-color: var(--unit-primary-color);
+  color: var(--unit-common-color-white);
+}
+
+.btn-outline-danger {
+  color: #dc3545;
+  border-color: #dc3545;
+  background-color: transparent;
+  font-weight: var(--unit-fw-medium);
+}
+
+.btn-outline-danger:hover,
+.btn-outline-danger:focus {
+  background-color: #dc3545;
+  border-color: #dc3545;
+  color: var(--unit-common-color-white);
+}
+
+.alert {
+  border-radius: 4px;
+  font-weight: var(--unit-fw-medium);
+}
+
+.text-muted {
+  color: var(--unit-ternary-color) !important;
+}
+
+.spinner-border.text-primary {
+  color: var(--unit-primary-color) !important;
+}
+
+.document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.document-item {
+  background-color: var(--unit-bg-color);
+  border: 1px solid var(--unit-ternary-color);
+  border-radius: 6px;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: border-color 0.3s ease;
+}
+
+.document-item:hover {
+  border-color: var(--unit-primary-color);
+}
+
+.document-info h5 {
+  color: var(--unit-heading-font-color);
+  font-weight: var(--unit-fw-semi-bold);
+  margin: 0 0 0.25rem 0;
+  font-size: 1.1rem;
+}
+
+.document-info small {
+  font-size: 0.85rem;
+}
+
+.document-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.user-search-results {
+  position: relative;
+  background-color: var(--unit-bg-color);
+  border: 1px solid var(--unit-ternary-color);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: -1px;
+  z-index: 1000;
+}
+
+.user-search-item {
+  padding: 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--unit-ternary-color);
+  transition: background-color 0.2s ease;
+}
+
+.user-search-item:last-child {
+  border-bottom: none;
+}
+
+.user-search-item:hover {
+  background-color: var(--unit-secondary-color);
+}
+
+.user-search-item strong {
+  color: var(--unit-heading-font-color);
+  font-weight: var(--unit-fw-semi-bold);
+}
+
+.editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.editor-item {
+  background-color: var(--unit-bg-color);
+  border: 1px solid var(--unit-ternary-color);
+  border-radius: 6px;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.editor-info h6 {
+  color: var(--unit-heading-font-color);
+  font-weight: var(--unit-fw-semi-bold);
+  margin: 0 0 0.25rem 0;
+  font-size: 1rem;
+}
+
+.editor-info small {
+  font-size: 0.85rem;
+}
+
+.editor-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.editor-controls .form-select {
+  width: auto;
+  min-width: 120px;
+  padding: 0.375rem 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .document-item,
+  .editor-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .document-actions,
+  .editor-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .main-title {
+    font-size: 2rem;
+  }
+}
+
+@media (max-width: 576px) {
+  .document-manager {
+    padding: 1rem 0;
+  }
+
+  .main-title {
+    font-size: 1.75rem;
+  }
+
+  .custom-card .card-body {
+    padding: 1rem;
+  }
+}
