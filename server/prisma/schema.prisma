@@ -67,6 +67,23 @@ model Editor {
   @@unique([documentId, userId])
 }
 
+model DocumentSnapShot {
+  id                      String    @id   @default(cuid())
+  documentId              String    
+  version                 Int
+  content                 String
+  createdAt               DateTime   @default(now())
+}
+
+model OperationLog {
+  id                  String    @id  @default(cuid())
+  documentId          String
+  serverSeq           Int
+  version             Int
+  op                  String
+  createdAt           DateTime  @default(now())
+}
+
 enum EditorRole {
   OWNER
   EDITOR
@@ -77,4 +94,9 @@ enum AuthType {
   EMAIL
   GOOGLE
   GITHUB
+}
+model Add_document_snapshot_and_operation_log {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
