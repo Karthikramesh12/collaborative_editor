@@ -41,7 +41,7 @@ class DocumentState {
       content: this.content
     });
   }
-
+  console.log("DOC", this.documentId, "=", this.content);
   return entry;
 }
 }

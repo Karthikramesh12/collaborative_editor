@@ -845,8 +845,43 @@ backend/
 ├── server.js
 └── README.md
 
+To Do section: 
 
+Step 4 — Add op compression / batching
 
+Merge multiple inserts/deletes from same client into one canonical op before rebasing.
+
+This reduces window churn and DB load.
+
+Step 5 — Add document lifecycle
+
+Implement:
+
+auto snapshot eviction
+
+op window trimming per document
+
+idle document unload
+
+Right now memory will grow forever.
+
+Step 6 — Permission gates
+
+Only after realtime is stable:
+
+integrate auth
+
+add ACL per document
+
+enforce write scopes
+
+Do not touch auth until steps 1–5 are done.
+
+Step 7 — Frontend binding
+
+Only now do you wire React.
+
+Not before.
 
 
 
