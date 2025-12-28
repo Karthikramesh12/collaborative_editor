@@ -11,37 +11,48 @@ class CollabEngine {
     if (!client) throw new Error("GHOST_CLIENT");
 
     if (typeof op.baseVersion !== "number") {
-  throw new Error("MISSING_BASE_VERSION");
-}
+      throw new Error("MISSING_BASE_VERSION");
+    }
+    
+    const serverGap = doc.serverSeq - op.baseVersion;
 
-const serverGap = doc.serverSeq - op.baseVersion;
+    if (!op.opId) throw new Error("MISSING_OPID");
 
+    // ====== FIXED DEDUPLICATION ======
+    // Check for duplicate opId (not packetId)
+    if (doc.dedup.hasSeen(op.opId)) {
+      console.log(`[DEDUP] Skipping duplicate operation: ${op.opId}`);
+      return null; // Return null to indicate duplicate
+    }
+    // ================================
 
     // Hard stale fence
     if (serverGap > doc.opWindow.WINDOW_SIZE) {
       throw new Error("RESYNC_REQUIRED");
     }
 
-    // Dedup must be checked after stale gate
-    if (doc.dedup.hasSeen(op.operationId)) {
-      console.log("DEDUP IGNORE", op.operationId);
-      return null;
-    }
-
     let finalOp = op;
 
     if (serverGap > 0) {
-      console.log("REBASING", op.operationId, "gap", serverGap);
+      console.log("REBASING", op.opId, "gap", serverGap);
       const recent = doc.opWindow.since(op.baseVersion);
       if (!recent) throw new Error("RESYNC_REQUIRED");
       finalOp = Rebase.rebase(op, recent.map(e => e.op));
     } else {
-      console.log("DIRECT APPLY", op.operationId);
+      console.log("DIRECT APPLY", op.opId);
     }
 
-    const result = doc.apply(finalOp);
+    const applied = doc.apply(finalOp);
     console.log("APPLIED v", doc.serverSeq, "text", finalOp.text);
-    return result;
+
+    // Mark opId as seen (not packetId)
+    doc.dedup.mark(finalOp.opId);
+    
+    applied.opId = finalOp.opId;
+    applied.clientId = finalOp.clientId || finalOp.userId;
+    applied.baseVersion = finalOp.baseVersion;
+
+    return applied;
   }
 }
 

@@ -1,6 +1,6 @@
 class Operation {
   constructor({ opId, clientId, baseServerSeq, type, pos, text, length }) {
-    this.operationId = opId;
+    this.opId = opId;
     this.clientId = clientId;
     this.baseServerSeq = baseServerSeq;
     this.type = type;

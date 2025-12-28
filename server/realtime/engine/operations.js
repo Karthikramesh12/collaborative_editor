@@ -5,7 +5,7 @@ const OP_TYPE = {
 };
 
 function validate(op) {
-    if (!op.operationId) throw new Error("missing operationId");
+    if (!op.opId) throw new Error("missing opId");
     if (typeof op.baseVersion !== "number") throw new Error("missing baseVersion");
     if (!Object.values(OP_TYPE).includes(op.type)) throw new Error("invalid type");
     if (typeof op.pos !== 'number' || op.pos < 0) throw new Error("invalid pos");

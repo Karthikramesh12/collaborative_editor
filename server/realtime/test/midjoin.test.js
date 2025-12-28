@@ -9,13 +9,22 @@ function spawn(id, autoFire = true) {
   const ws = new WebSocket(`ws://localhost:3000/?documentId=${DOC}`);
   let base = 0;
   let ready = false;
-
-  ws.on("open", () => ready = true);
+  let clientId = null; // Track the assigned clientId
 
   ws.on("message", raw => {
     const msg = JSON.parse(raw.toString());
 
-    if (msg.type === "snapshot") base = msg.snapshot.version;
+    // Store the clientId when server assigns it
+    if (msg.type === "clientId") {
+      clientId = msg.clientId;
+      console.log(`Client ${id} got ID: ${clientId.substring(0, 8)}...`);
+    }
+    
+    if (msg.type === "snapshot") {
+      base = msg.snapshot.version;
+      console.log(`Client ${id} got snapshot, version: ${base}`);
+      ready = true;
+    }
     if (msg.type === "ack") base = msg.version;
     if (msg.type === "resync") {
       console.log("RESYNC", id, "->", msg.snapshot.version);
@@ -27,6 +36,7 @@ function spawn(id, autoFire = true) {
     let sent = 0;
     const loop = setInterval(() => {
       if (!ready) return;
+      if (!clientId) return; // Wait for clientId
       if (sent >= OPS_PER_CLIENT) return clearInterval(loop);
       sent++;
 
@@ -35,7 +45,8 @@ function spawn(id, autoFire = true) {
       ws.send(JSON.stringify({
         type: "op",
         op: {
-          operationId: randomUUID(),
+          opId: randomUUID(),
+          clientId: clientId, // Use the server-assigned clientId
           baseVersion: base,
           type: "insert",
           pos: 0,

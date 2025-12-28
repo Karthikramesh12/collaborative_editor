@@ -14,14 +14,28 @@ function leave(docId, ws){
     }
 }
 
-function broadCast(docId, msg){
-    const room = rooms.get(docId);
-    if (!room) return;
-    const data = JSON.stringify(msg);
-    for (const ws of room){
-        if (ws.readyState === 1) ws.send(data);
+function broadCast(docId, msg) {
+  const room = rooms.get(docId);
+
+  if (!room || room.size === 0) {
+    console.log("[BROADCAST] Room empty:", docId);
+    return 0;
+  }
+
+  const data = JSON.stringify(msg);
+  let delivered = 0;
+
+  for (const ws of room) {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(data);
+      delivered++;
     }
+  }
+
+  console.log("[BROADCAST] Delivered to", delivered, "clients");
+  return delivered;
 }
+
 
 module.exports = {
     join,
