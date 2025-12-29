@@ -20,9 +20,9 @@ class OpWindow {
     }
   }
 
-  since(version) {
-  if (version < this.earliestSeq - 1) return null;
-  return this.window.filter(e => e.version > version);
+  since(baseVersion) {
+  if (baseVersion < this.baseVersion - 1) return null;
+  return this.window.filter(e => e.baserServerSeq > baseVersion);
 }
 
 

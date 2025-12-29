@@ -11,6 +11,7 @@ class DocumentState {
     this.serverSeq = 0;
     this.opWindow = new OpWindow();
     this.dedup = new Dedup();
+    this.lastTouched = Date.now();
   }
 
   getSnapShot() {
@@ -27,6 +28,7 @@ class DocumentState {
     this.content = apply(this.content, finalOp);
     this.version++;
     this.serverSeq++;
+    this.lastTouched = Date.now(); 
 
     const entry = { 
       serverSeq: this.serverSeq, 

@@ -1,10 +1,14 @@
 const store = require('../memory/document.store.js');
 const Rebase = require('./rebase.js');
 const registry = require('../sessions/client.registry.js');
+const Cursor = require('../sessions/presence.registry.js');
+const { rebaseCursor } = require('./cursor.rebase.js');
+const opLogRepo = require('../persistence/opLog.repo.js');
+const snapper = require('./snapshot.manager.js');
 
 class CollabEngine {
   async submitOperation(documentId, op, clientId) {
-    const doc = store.getDocument(documentId);
+    const doc = await store.getDocument(documentId);
     if (!doc) throw new Error("DOCUMENT_NOT_LOADED");
 
     const client = registry.get(clientId);
@@ -43,6 +47,19 @@ class CollabEngine {
     }
 
     const applied = doc.apply(finalOp);
+    await opLogRepo.append(documentId, {
+  newServerSequence: doc.serverSeq,
+  newVersion: doc.version,
+  op: applied
+});
+
+await snapper.maybeSnapShot(doc);
+    const cursors = Cursor.all(documentId);
+    for (const c of cursors){
+      c.pos = rebaseCursor(c.pos, finalOp);
+      c.lastSeen = Date.now();
+      Cursor.set(c.clientId, c);
+    }
     console.log("APPLIED v", doc.serverSeq, "text", finalOp.text);
 
     // Mark opId as seen (not packetId)

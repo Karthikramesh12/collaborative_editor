@@ -5,7 +5,7 @@ const BATCH_WINDOW_MS = 20;
 // Store documentId per client (we'll need to set this when client connects)
 const ClientDocuments = new Map(); // clientId -> documentId
 
-function push(clientId, op, flushFn) {
+async function push(clientId, op, flushFn) {
     if (!Batches.has(clientId)) {
         Batches.set(clientId, []);
     }
@@ -17,7 +17,7 @@ function push(clientId, op, flushFn) {
     if (documentId) {
         // Get the document from store
         const store = require('../memory/document.store.js');
-        const doc = store.getDocument(documentId);
+        const doc = await store.getDocument(documentId);
         
         if (doc && doc.dedup && doc.dedup.hasSeen(op.opId)) {
             console.log(`[BATCH-DEDUP] Global duplicate: ${op.opId.substring(0, 8)} for client ${clientId.substring(0, 8)}`);

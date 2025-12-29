@@ -1,11 +1,12 @@
 const snapshotRepo = require('../persistence/snapshot.repo.js');
 const documentStore = require('../memory/document.store.js');
 const documentState = require('./document.state.js');
+const opLogRepo = require('../persistence/opLog.repo.js');
 
-const SNAP_INTERVAL = 1000;
+const SNAP_INTERVAL = 300;
 
 async function maybeSnapShot(doc) {
-    if (doc.version % SNAP_INTERVAL !== 0) {
+    if (doc.serverSeq % SNAP_INTERVAL !== 0) {
         return;
     }
 
@@ -17,16 +18,28 @@ async function maybeSnapShot(doc) {
 }
 
 async function loadOrCreate(documentId) {
-    const snap = await snapshotRepo.latest(documentId);
+  const snap = await snapshotRepo.latest(documentId);
 
-    let doc;
-    if (!snap) {
-        doc = documentStore.createDocument(documentId, "");
-    } else {
-        doc = documentStore.createDocument(documentId, snap.content);
-        doc.version = snap.version;
-    }
-    return doc;
+  let doc;
+  let baseVersion = 0;
+
+  if (!snap) {
+    doc = documentStore.createDocument(documentId, "");
+  } else {
+    doc = documentStore.createDocument(documentId, snap.content);
+    doc.version = snap.version;
+    baseVersion = snap.version;
+  }
+
+  // REPLAY oplog after snapshot
+  const oplogs = await opLogRepo.since(documentId, baseVersion);
+  for (const row of oplogs) {
+    const op = JSON.parse(row.op);
+    doc.apply(op, true); // true = recovery mode, no rebasing, no dedup
+    doc.serverSeq = row.serverSeq;
+  }
+
+  return doc;
 }
 
 module.exports = {

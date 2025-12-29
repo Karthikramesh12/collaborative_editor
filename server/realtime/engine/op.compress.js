@@ -73,10 +73,10 @@ function mergeGroup(group) {
   const first = group[0];
 
   const merged = {
-    opId: first.opId,                    // canonical chain id
+    opId: first.opId,
     clientId: first.clientId,
-    baseVersion: first.baseVersion,      // DO NOT DROP THIS
-    baseServerSeq: first.baseServerSeq,  // engine uses this
+    baseVersion: first.baseVersion,
+    baseServerSeq: first.baseServerSeq,
     type: first.type,
     pos: first.pos,
     text: first.text || "",
@@ -85,13 +85,8 @@ function mergeGroup(group) {
 
   for (let i = 1; i < group.length; i++) {
     const next = group[i];
-
-    if (merged.type === "insert") {
-      merged.text += next.text;
-    }
-    else if (merged.type === "delete") {
-      merged.length += next.length;
-    }
+    if (merged.type === "insert") merged.text += next.text;
+    else if (merged.type === "delete") merged.length += next.length;
     else if (merged.type === "replace") {
       merged.text += next.text;
       merged.length += next.length;
