@@ -3,44 +3,61 @@ const Client = new Map();
 const HEARTBEAT_TIMEOUT = 15000;
 
 function register(ws, { clientId, documentId, lastSeenVersion }) {
-  const meta = {
+  Client.set(clientId, {
     clientId,
     ws,
     documentId,
     lastSeenVersion,
     lastSeenHeartBeat: Date.now(),
-    connectedAt: Date.now()
-  };
+    connectedAt: Date.now(),
+    pending: true,
+    live: false
+  });
 
-  Client.set(clientId, meta);
-
-  // REAL TCP heartbeat — pong frame
   ws.on("pong", () => {
     const c = Client.get(clientId);
     if (c) c.lastSeenHeartBeat = Date.now();
   });
 }
 
-function touch(clientId) {
-  const c = Client.get(clientId);
+function markPending(id) {
+  const c = Client.get(id);
+  if (c) {
+    c.pending = true;
+    c.live = false;
+  }
+}
+
+function markLive(id) {
+  const c = Client.get(id);
+  if (c) {
+    c.pending = false;
+    c.live = true;
+  }
+}
+
+function isLive(id) {
+  return Client.get(id)?.live === true;
+}
+
+function touch(id) {
+  const c = Client.get(id);
   if (c) c.lastSeenHeartBeat = Date.now();
 }
 
-function updateVersion(clientId, version) {
-  const c = Client.get(clientId);
+function updateVersion(id, version) {
+  const c = Client.get(id);
   if (c) c.lastSeenVersion = version;
 }
 
-function unRegister(clientId) {
-  return Client.delete(clientId);
+function unRegister(id) {
+  Client.delete(id);
 }
 
 function reapDeadClients() {
   const now = Date.now();
-
   for (const [id, c] of Client) {
     if (now - c.lastSeenHeartBeat > HEARTBEAT_TIMEOUT) {
-      console.log("TCP DEAD CLIENT REAPED", id);
       try { c.ws.terminate(); } catch {}
       Client.delete(id);
     }
@@ -49,7 +66,6 @@ function reapDeadClients() {
 
 setInterval(reapDeadClients, 5000);
 
-// REAL TCP ping frames
 function pingAll() {
   for (const c of Client.values()) {
     try { c.ws.ping(); } catch {}
@@ -60,6 +76,9 @@ setInterval(pingAll, 5000);
 
 module.exports = {
   register,
+  markPending,
+  markLive,
+  isLive,
   touch,
   updateVersion,
   unRegister,

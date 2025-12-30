@@ -18,13 +18,7 @@ async function push(clientId, op, flushFn) {
         // Get the document from store
         const store = require('../memory/document.store.js');
         const doc = await store.getDocument(documentId);
-        
-        if (doc && doc.dedup && doc.dedup.hasSeen(op.opId)) {
-            console.log(`[BATCH-DEDUP] Global duplicate: ${op.opId.substring(0, 8)} for client ${clientId.substring(0, 8)}`);
-            // We should still ack the client, but we don't have access to ws here
-            // The controller will need to handle this case
-            return; // Drop the operation
-        }
+
     } else {
         console.warn(`[BATCH] No documentId for client ${clientId.substring(0, 8)}, skipping global dedup`);
     }
@@ -87,7 +81,7 @@ function setDocument(clientId, documentId) {
 // Helper to determine if ops can be batched
 function canBatchTogether(a, b) {
     if (a.clientId !== b.clientId) return false;
-    if (a.baseServerSeq !== b.baseServerSeq) return false;
+    if (a.baseVersion !== b.baseVersion) return false;
     
     // Only batch inserts at adjacent positions
     if (a.type === "insert" && b.type === "insert") {

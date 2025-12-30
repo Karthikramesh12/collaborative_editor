@@ -1,27 +1,23 @@
 const { validate } = require('../engine/operations.js');
 
 function gaurd(raw) {
-  if (!raw || typeof raw !== 'object') {
-    throw new Error("INVALID_OP_OBJECT");
-  }
+  if (!raw || typeof raw !== 'object') throw new Error("INVALID_OP_OBJECT");
 
   const op = {
-  ...raw,
-  opId: raw.opId,
-  clientId: raw.clientId || raw.userId,
-  baseServerSeq: raw.baseServerSeq ?? raw.baseVersion
-};
+    opId: raw.opId,
+    clientId: raw.clientId || raw.userId,
+    baseVersion: raw.baseVersion,
+    type: raw.type,
+    pos: raw.pos,
+    text: raw.text,
+    length: raw.length
+  };
 
-if (typeof op.baseServerSeq !== "number") throw new Error("MISSING_BASE_VERSION");
-
-
-  // Hard contract normalization
-  if (!op.opId) throw new Error("MISSING_OPID");
-  if (!op.clientId) throw new Error("MISSING_CLIENTID");
+  // Canonical causal anchor
   if (typeof op.baseVersion !== "number") throw new Error("MISSING_BASE_VERSION");
 
-  // Rewrite canonical fields so rest of engine sees only 1 protocol
-  op.baseServerSeq = op.baseVersion;
+  if (!op.opId) throw new Error("MISSING_OPID");
+  if (!op.clientId) throw new Error("MISSING_CLIENTID");
 
   validate(op);
 

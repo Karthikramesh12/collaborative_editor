@@ -5,6 +5,7 @@ const Cursor = require('../sessions/presence.registry.js');
 const { rebaseCursor } = require('./cursor.rebase.js');
 const opLogRepo = require('../persistence/opLog.repo.js');
 const snapper = require('./snapshot.manager.js');
+const snapShot = require('../persistence/snapshot.repo.js');
 
 class CollabEngine {
   async submitOperation(documentId, op, clientId) {
@@ -13,63 +14,57 @@ class CollabEngine {
 
     const client = registry.get(clientId);
     if (!client) throw new Error("GHOST_CLIENT");
-
-    if (typeof op.baseVersion !== "number") {
-      throw new Error("MISSING_BASE_VERSION");
-    }
-    
-    const serverGap = doc.serverSeq - op.baseVersion;
-
     if (!op.opId) throw new Error("MISSING_OPID");
 
-    // ====== FIXED DEDUPLICATION ======
-    // Check for duplicate opId (not packetId)
-    if (doc.dedup.hasSeen(op.opId)) {
-      console.log(`[DEDUP] Skipping duplicate operation: ${op.opId}`);
-      return null; // Return null to indicate duplicate
-    }
-    // ================================
+    // 1 — DEDUP GATE
+    if (doc.dedup.hasSeen(op.opId)) return null;
+    doc.dedup.mark(op.opId);
 
-    // Hard stale fence
-    if (serverGap > doc.opWindow.WINDOW_SIZE) {
-      throw new Error("RESYNC_REQUIRED");
-    }
-
-    let finalOp = op;
-
-    if (serverGap > 0) {
-      console.log("REBASING", op.opId, "gap", serverGap);
-      const recent = doc.opWindow.since(op.baseVersion);
-      if (!recent) throw new Error("RESYNC_REQUIRED");
-      finalOp = Rebase.rebase(op, recent.map(e => e.op));
-    } else {
-      console.log("DIRECT APPLY", op.opId);
+    // 2 — HARD STALE FENCE
+    const earliest = doc.opWindow.earliestServerSeq();
+    if (earliest !== null && op.baseVersion < earliest) {
+      const snap = await snapShot.latest(documentId);
+      client.ws.send(JSON.stringify({ type: "snapshot", snap }));
+      return null;
     }
 
-    const applied = doc.apply(finalOp);
+    // 3 — CAUSAL REBASE
+    const recent = doc.opWindow.sinceServerSeq(op.baseVersion);
+    const rebased = recent.length
+      ? Rebase.rebase(op, recent.map(e => e.op))
+      : op;
+
+    if (!rebased ||
+    !rebased.opId ||
+    !rebased.clientId ||
+    typeof rebased.baseVersion !== 'number') {
+  throw new Error("REBASER_RETURNED_INVALID_OP");
+}
+
+    // 4 — COMMIT
+    const entry = doc.apply(rebased);
+
+    // 5 — PERSISTENCE
     await opLogRepo.append(documentId, {
-  newServerSequence: doc.serverSeq,
-  newVersion: doc.version,
-  op: applied
-});
+      serverSeq: entry.serverSeq,
+      version: entry.version,
+      op: entry.op
+    });
 
-await snapper.maybeSnapShot(doc);
+    await snapper.maybeSnapShot(doc);
+
+    // 6 — BROADCAST
     const cursors = Cursor.all(documentId);
-    for (const c of cursors){
-      c.pos = rebaseCursor(c.pos, finalOp);
-      c.lastSeen = Date.now();
+    for (const c of cursors) {
+      c.pos = rebaseCursor(c.pos, rebased);
       Cursor.set(c.clientId, c);
     }
-    console.log("APPLIED v", doc.serverSeq, "text", finalOp.text);
 
-    // Mark opId as seen (not packetId)
-    doc.dedup.mark(finalOp.opId);
-    
-    applied.opId = finalOp.opId;
-    applied.clientId = finalOp.clientId || finalOp.userId;
-    applied.baseVersion = finalOp.baseVersion;
-
-    return applied;
+    return {
+      serverSeq: entry.serverSeq,
+      version: entry.version,
+      op: entry.op
+    };
   }
 }
 

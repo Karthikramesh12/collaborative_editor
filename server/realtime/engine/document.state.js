@@ -18,6 +18,7 @@ class DocumentState {
     return {
       documentId: this.documentId,
       version: this.version,
+      serverSeq: this.serverSeq,
       content: this.content
     };
   }
@@ -26,35 +27,21 @@ class DocumentState {
     validate(finalOp);
 
     this.content = apply(this.content, finalOp);
-    this.version++;
-    this.serverSeq++;
-    this.lastTouched = Date.now(); 
+    this.version++;     // UI version only
+    this.serverSeq++;   // authoritative ordering
+    this.lastTouched = Date.now();
 
-    const entry = { 
-      serverSeq: this.serverSeq, 
-      version: this.version, 
-      op: finalOp 
+    const entry = {
+      serverSeq: this.serverSeq,
+      version: this.version,
+      op: { ...finalOp, baseVersion: this.serverSeq - 1 }
     };
-    
+
     this.opWindow.append(entry);
-    
-    // Only mark opId for deduplication
-    // Remove packetId marking since we don't use it
-    // if (finalOp.packetId) this.dedup.mark(finalOp.packetId); // REMOVE THIS
-    
-    // 🔒 Deterministic convergence verdict
-    const EXPECTED = 6 * 10;   // CLIENTS * OPS_PER_CLIENT
-    if (this.version === EXPECTED) {
-      rooms.broadCast(this.documentId, {
-        type: "final",
-        version: this.version,
-        content: this.content
-      });
-    }
-    
-    console.log("DOC", this.documentId, "=", this.content);
     return entry;
   }
+
+
 }
 
 module.exports = DocumentState;

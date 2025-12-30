@@ -43,6 +43,8 @@ async function handleConnection(ws, req) {
   ws.send(JSON.stringify({ type: "clientId", clientId }));
   ws.send(JSON.stringify({ type: "snapshot", snapshot: doc.getSnapShot() }));
 
+  registry.markPending(clientId);
+
   ws.on("message", raw => {
     registry.touch(clientId);
     onMessage(ws, clientId, documentId, raw);
@@ -64,6 +66,7 @@ async function onMessage(ws, clientId, documentId, raw) {
   console.log(`[WS] Raw message: ${raw.toString().substring(0, 100)}`);
 
   let payload;
+  
   try {
     payload = JSON.parse(raw.toString());
     console.log(`[WS] Parsed payload type: ${payload.type}`);
@@ -72,10 +75,13 @@ async function onMessage(ws, clientId, documentId, raw) {
     return ws.close(1003, "BAD_JSON");
   }
 
-  if (payload.type !== "op") {
-    console.log(`[WS] Ignoring non-op message type: ${payload.type}`);
-    return;
-  }
+  if (payload.type === "snapshotAck") {
+  registry.markLive(clientId);
+  return;
+}
+
+if (payload.type !== "op") return;
+
 
   console.log(`[WS] Operation payload:`, JSON.stringify(payload.op, null, 2));
 
@@ -114,99 +120,49 @@ async function onMessage(ws, clientId, documentId, raw) {
   console.log(`[WS] Pushing operation to batch buffer for client ${clientId.substring(0, 8)}`);
 
   await push(clientId, op, async (batchedOps) => {
-    console.log(`[BATCH ${clientId.substring(0, 8)}] Flushing ${batchedOps.length} operations`);
-    // In your controller, inside the push() callback:
-    console.log(`[BATCH ${clientId.substring(0, 8)}] Raw batched ops:`);
-    batchedOps.forEach((op, i) => {
-      console.log(`  [${i}] opId: ${op.opId.substring(0, 8)}, text: "${op.text}"`);
-    });
 
-    // Then run the dedup logic and log:
-    console.log(`[BATCH-DEDUP] Checking ${batchedOps.length} ops...`);
-    const seenOpIds = new Set();
-    const uniqueOps = [];
+  let lastResult = null;
 
-    for (const op of batchedOps) {
-      if (seenOpIds.has(op.opId)) {
-        console.log(`[BATCH-DEDUP] DUPLICATE FOUND: ${op.opId.substring(0, 8)}`);
-      } else {
-        seenOpIds.add(op.opId);
-        uniqueOps.push(op);
-      }
-    }
-    console.log(`[BATCH-DEDUP] Result: ${uniqueOps.length} unique ops`);
+  const byBase = new Map();
+  for (const o of batchedOps) {
+    const k = o.baseVersion;
+    if (!byBase.has(k)) byBase.set(k, []);
+    byBase.get(k).push(o);
+  }
 
-    try {
-      // ====== FIX 1: DEDUPLICATE BEFORE COMPRESSION ======
-      const uniqueOps = [];
-      const seenOpIds = new Set();
-      let duplicateCount = 0;
+  for (const group of byBase.values()) {
+    const merged = compress(group);
+    const ops = merged ? [merged] : group;
 
-      for (const op of batchedOps) {
-        if (!seenOpIds.has(op.opId)) {
-          seenOpIds.add(op.opId);
-          uniqueOps.push(op);
-        } else {
-          console.log(`[BATCH-DEDUP] Skipping duplicate opId: ${op.opId.substring(0, 8)}...`);
-          duplicateCount++;
-        }
-      }
+    for (const o of ops) {
+      const result = await engine.submitOperation(documentId, o, clientId);
+      if (!result) continue;
 
-      if (duplicateCount > 0) {
-        console.log(`[BATCH-DEDUP] Removed ${duplicateCount} duplicates, processing ${uniqueOps.length} unique ops`);
-      }
-
-      // If all ops were duplicates, just ack and return
-      if (uniqueOps.length === 0) {
-        console.log(`[BATCH-DEDUP] All operations were duplicates, sending ack`);
-        flow.markAck(clientId);
-        ws.send(JSON.stringify({ type: "ack", version: "duplicate" }));
-        return;
-      }
-      // ===================================================
-
-      const compressedOp = compress(uniqueOps);
-      console.log(`[BATCH] Compressed to:`, compressedOp);
-
-      console.log(`[BATCH] Submitting to engine...`);
-      const result = await engine.submitOperation(documentId, compressedOp, clientId);
-      console.log(`[BATCH] Engine result:`, result);
-
-      if (!result) {
-        console.log(`[BATCH] Engine returned null/false`);
-        flow.markAck(clientId);
-        return;
-      }
+      lastResult = result;
 
       registry.updateVersion(clientId, result.version);
 
-      console.log(`[BROADCAST] Broadcasting to room...`);
-      const broadcastResult = rooms.broadCast(documentId, {
+      rooms.broadCast(documentId, {
         type: "op",
-        data: result
-      });
-
-      console.log(`[BROADCAST] Result:`, broadcastResult);
-
-      ws.send(JSON.stringify({ type: "ack", version: result.version }));
-      flow.markAck(clientId);
-      console.log(`[BATCH] Successfully processed batch`);
-
-    } catch (err) {
-      console.error(`[BATCH] Error:`, err.message);
-      console.error(`[BATCH] Stack:`, err.stack);
-
-      flow.markAck(clientId);
-      if (err.message === "RESYNC_REQUIRED") {
-        const doc = await store.getDocument(documentId);
-        ws.send(JSON.stringify({ type: "resync", snapshot: doc.getSnapShot() }));
-        clear(clientId);
-        return ws.close(4000, "STALE_CLIENT");
-      }
-
-      ws.close(1011);
+        serverSeq: result.serverSeq,
+        version: result.version,
+        op: result.op
+      }, c => registry.isLive(c.clientId));
     }
-  });
+  }
+
+  if (lastResult) {
+    ws.send(JSON.stringify({
+      type: "ack",
+      version: lastResult.version,
+      serverSeq: lastResult.serverSeq,
+      op: lastResult.op
+    }));
+    flow.markAck(clientId);
+  }
+});
+
+
 }
 
 module.exports = { handleConnection };

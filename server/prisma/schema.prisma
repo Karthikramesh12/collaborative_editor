@@ -78,10 +78,11 @@ model DocumentSnapShot {
 model OperationLog {
   id                  String    @id  @default(cuid())
   documentId          String
-  serverSeq           Int
   version             Int
   op                  String
   createdAt           DateTime  @default(now())
+
+  @@index([documentId, version])
 }
 
 enum EditorRole {

@@ -1,12 +1,13 @@
-function rebase(incoming, appliedOps){
-    let op = { ...incoming };
+function rebase(incoming, appliedOps) {
+  let op = { ...incoming };
 
-    for (const prev of appliedOps){
-        op = transform(op, prev);
-    }
+  for (const prev of appliedOps) {
+    op = transform(op, prev);
+  }
 
-    return op;
+  return { ...incoming, ...op };   // preserve all metadata
 }
+
 
 function transform(op, prev){
     // INSERT vs INSERT
