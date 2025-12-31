@@ -43,6 +43,7 @@ class CollabEngine {
 
     // 4 — COMMIT
     const entry = doc.apply(rebased);
+    await store.persistDocument(documentId);
 
     // 5 — PERSISTENCE
     await opLogRepo.append(documentId, {
