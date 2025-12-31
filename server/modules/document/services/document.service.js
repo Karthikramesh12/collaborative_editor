@@ -5,6 +5,7 @@ async function createDocument(userId, title) {
         data:{
             title,
             ownerId: userId,
+            content: "",
             editors:{
                 create:{ userId, role: "OWNER"}
             }

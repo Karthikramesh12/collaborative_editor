@@ -16,25 +16,16 @@ function leave(docId, ws){
 
 function broadCast(docId, msg) {
   const room = rooms.get(docId);
-
-  if (!room || room.size === 0) {
-    console.log("[BROADCAST] Room empty:", docId);
-    return 0;
-  }
+  if (!room || room.size === 0) return;
 
   const data = JSON.stringify(msg);
-  let delivered = 0;
-
   for (const ws of room) {
-    if (ws.readyState === ws.OPEN) {
+    if (ws.readyState === WebSocket.OPEN) {
       ws.send(data);
-      delivered++;
     }
   }
-
-  console.log("[BROADCAST] Delivered to", delivered, "clients");
-  return delivered;
 }
+
 
 
 module.exports = {

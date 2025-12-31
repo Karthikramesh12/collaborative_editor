@@ -43,6 +43,8 @@ async function handleConnection(ws, req) {
   ws.send(JSON.stringify({ type: "clientId", clientId }));
   ws.send(JSON.stringify({ type: "snapshot", snapshot: doc.getSnapShot() }));
 
+  rooms.join(documentId, ws);
+
   registry.markPending(clientId);
 
   ws.on("message", raw => {
@@ -119,48 +121,35 @@ if (payload.type !== "op") return;
 
   console.log(`[WS] Pushing operation to batch buffer for client ${clientId.substring(0, 8)}`);
 
-  await push(clientId, op, async (batchedOps) => {
+  await push(clientId, op, async (singleOp) => {
+  const realClientId = singleOp.clientId;
 
-  let lastResult = null;
+  const result = await engine.submitOperation(documentId, singleOp, realClientId);
+  if (!result) return;
 
-  const byBase = new Map();
-  for (const o of batchedOps) {
-    const k = o.baseVersion;
-    if (!byBase.has(k)) byBase.set(k, []);
-    byBase.get(k).push(o);
-  }
+  registry.updateVersion(realClientId, result.version);
 
-  for (const group of byBase.values()) {
-    const merged = compress(group);
-    const ops = merged ? [merged] : group;
+  rooms.broadCast(documentId, {
+    type: "op",
+    serverSeq: result.serverSeq,
+    version: result.version,
+    op: result.op
+  }, c => registry.isLive(c.clientId));
 
-    for (const o of ops) {
-      const result = await engine.submitOperation(documentId, o, clientId);
-      if (!result) continue;
-
-      lastResult = result;
-
-      registry.updateVersion(clientId, result.version);
-
-      rooms.broadCast(documentId, {
-        type: "op",
-        serverSeq: result.serverSeq,
-        version: result.version,
-        op: result.op
-      }, c => registry.isLive(c.clientId));
-    }
-  }
-
-  if (lastResult) {
-    ws.send(JSON.stringify({
+  const target = registry.get(realClientId);
+  if (target) {
+    target.ws.send(JSON.stringify({
       type: "ack",
-      version: lastResult.version,
-      serverSeq: lastResult.serverSeq,
-      op: lastResult.op
+      version: result.version,
+      serverSeq: result.serverSeq,
+      op: result.op
     }));
-    flow.markAck(clientId);
   }
+
+  flow.markAck(realClientId);
 });
+
+
 
 
 }

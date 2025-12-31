@@ -1,100 +1,41 @@
-const Batches = new Map();
-const Timers = new Map();
-const BATCH_WINDOW_MS = 20;
+const Queues = new Map();     // clientId -> [{ op, flushFn }]
+const Active = new Set();    // clientId
 
-// Store documentId per client (we'll need to set this when client connects)
-const ClientDocuments = new Map(); // clientId -> documentId
-
-async function push(clientId, op, flushFn) {
-    if (!Batches.has(clientId)) {
-        Batches.set(clientId, []);
-    }
-    
-    // ====== GLOBAL DOCUMENT DEDUPLICATION ======
-    // Get the documentId for this client
-    const documentId = ClientDocuments.get(clientId);
-    
-    if (documentId) {
-        // Get the document from store
-        const store = require('../memory/document.store.js');
-        const doc = await store.getDocument(documentId);
-
-    } else {
-        console.warn(`[BATCH] No documentId for client ${clientId.substring(0, 8)}, skipping global dedup`);
-    }
-    // ===========================================
-    
-    const batch = Batches.get(clientId);
-    batch.push(op);
-    
-    // Check if we should flush immediately (e.g., for non-sequential ops)
-    if (batch.length > 0) {
-        const lastOp = batch[batch.length - 2]; // previous op
-        if (lastOp && !canBatchTogether(lastOp, op)) {
-            flush(clientId, flushFn);
-            return;
-        }
-    }
-
-    if (!Timers.has(clientId)) {
-        Timers.set(clientId, setTimeout(() => {
-            flush(clientId, flushFn);
-        }, BATCH_WINDOW_MS));
-    }
-}
-
-function flush(clientId, flushFn) {
-    const timer = Timers.get(clientId);
-    if (timer) {
-        clearTimeout(timer);
-        Timers.delete(clientId);
-    }
-
-    const list = Batches.get(clientId);
-    Batches.delete(clientId);
-
-    if (!list || list.length === 0) {
-        return;
-    }
-
-    // Call the flush function with the batched operations
-    flushFn(list);
+function setDocument(clientId, documentId) {
+  // Only for validation, no batching by doc
 }
 
 function clear(clientId) {
-    Batches.delete(clientId);
-    ClientDocuments.delete(clientId); // Clear document mapping too
-    
-    const timer = Timers.get(clientId);
-    if (timer) {
-        clearTimeout(timer);
-    }
-    Timers.delete(clientId);
+  Queues.delete(clientId);
+  Active.delete(clientId);
 }
 
-// NEW FUNCTION: Set documentId for a client (call this when client connects)
-function setDocument(clientId, documentId) {
-    ClientDocuments.set(clientId, documentId);
-    console.log(`[BATCH] Client ${clientId.substring(0, 8)} -> Document ${documentId}`);
+async function push(clientId, op, flushFn) {
+  if (!Queues.has(clientId)) Queues.set(clientId, []);
+  const q = Queues.get(clientId);
+  q.push({ op, flushFn });
+
+  if (!Active.has(clientId)) drain(clientId);
 }
 
-// Helper to determine if ops can be batched
-function canBatchTogether(a, b) {
-    if (a.clientId !== b.clientId) return false;
-    if (a.baseVersion !== b.baseVersion) return false;
-    
-    // Only batch inserts at adjacent positions
-    if (a.type === "insert" && b.type === "insert") {
-        return b.pos === a.pos + a.text.length;
-    }
-    
-    // Only batch deletes at same position
-    if (a.type === "delete" && b.type === "delete") {
-        return b.pos === a.pos;
-    }
-    
-    return false;
+async function drain(clientId) {
+  const q = Queues.get(clientId);
+  if (!q || !q.length) {
+    Active.delete(clientId);
+    return;
+  }
+
+  Active.add(clientId);
+  const { op, flushFn } = q.shift();
+
+  try {
+    await flushFn(op);
+  } catch (e) {
+    console.error("FLUSH FAILED", e);
+  }
+
+  Active.delete(clientId);
+  if (q.length) drain(clientId);
 }
 
-// Keep the same exports, but add setDocument
 module.exports = { push, clear, setDocument };

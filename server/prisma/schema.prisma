@@ -45,7 +45,7 @@ model Document {
   id      String @id @default(cuid())
   title   String
   ownerId String
-
+  content String @db.Text 
   owner User @relation("OwnedDocuments", fields: [ownerId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())

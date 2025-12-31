@@ -7,34 +7,38 @@ const SNAP_INTERVAL = 300;
 async function maybeSnapShot(doc) {
   if (doc.version % SNAP_INTERVAL !== 0) return;
 
+  const frozen = doc.clone(); // deep copy, not reference
+
   await snapshotRepo.save({
-    documentId: doc.documentId,
-    version: doc.version,
-    content: doc.content
+    documentId: frozen.documentId,
+    version: frozen.version,
+    content: frozen.content
   });
 }
+
 
 async function loadOrCreate(documentId) {
   const snap = await snapshotRepo.latest(documentId);
 
-  let doc;
   let baseVersion = 0;
+  let tempDoc;
 
   if (!snap) {
-    doc = documentStore.createDocument(documentId, "");
+    tempDoc = documentStore.createTempDocument("");
   } else {
-    doc = documentStore.createDocument(documentId, snap.content);
-    doc.version = snap.version;
+    tempDoc = documentStore.createTempDocument(snap.content);
+    tempDoc.version = snap.version;
     baseVersion = snap.version;
   }
 
   const oplogs = await opLogRepo.since(documentId, baseVersion);
 
   for (const row of oplogs) {
-    doc.apply(JSON.parse(row.op), true);
+    tempDoc.apply(JSON.parse(row.op), true);
   }
 
-  return doc;
+  return documentStore.hydrateLive(tempDoc);
 }
+
 
 module.exports = { maybeSnapShot, loadOrCreate };
