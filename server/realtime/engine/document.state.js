@@ -41,7 +41,12 @@ class DocumentState {
     return entry;
   }
 
-
+  clone() {
+  const c = new DocumentState(this.documentId, this.content);
+  c.version = this.version;
+  c.serverSeq = this.serverSeq;
+  return c;
+}
 }
 
 module.exports = DocumentState;
