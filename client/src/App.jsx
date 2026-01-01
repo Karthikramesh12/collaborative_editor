@@ -4,6 +4,7 @@ import Auth from "./pages/Auth.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import DocumentManager from "./pages/DocumentManager.jsx";
 import './index.css';
+import CollabEditor from "./pages/Editor.jsx";
 
 function App() {
   return (
@@ -23,6 +24,14 @@ function App() {
         element={
           <ProtectedRoute>
             <DocumentManager/>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/editor/:docId"
+        element={
+          <ProtectedRoute>
+            <CollabEditor/>
           </ProtectedRoute>
         }
       />

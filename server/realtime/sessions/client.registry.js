@@ -1,9 +1,10 @@
 const Client = new Map();
 
 const HEARTBEAT_TIMEOUT = 15000;
+const BySocket = new Map();
 
 function register(ws, { clientId, documentId, lastSeenVersion }) {
-  Client.set(clientId, {
+  const meta = {
     clientId,
     ws,
     documentId,
@@ -12,7 +13,10 @@ function register(ws, { clientId, documentId, lastSeenVersion }) {
     connectedAt: Date.now(),
     pending: true,
     live: false
-  });
+  };
+
+  Client.set(clientId, meta);
+  BySocket.set(ws, meta);
 
   ws.on("pong", () => {
     const c = Client.get(clientId);
@@ -51,6 +55,8 @@ function updateVersion(id, version) {
 }
 
 function unRegister(id) {
+  const c = Client.get(id);
+  if (c) BySocket.delete(c.ws);
   Client.delete(id);
 }
 
@@ -62,6 +68,10 @@ function reapDeadClients() {
       Client.delete(id);
     }
   }
+}
+
+function getBySocket(ws) {
+  return BySocket.get(ws) || null;
 }
 
 setInterval(reapDeadClients, 5000);
@@ -82,5 +92,6 @@ module.exports = {
   touch,
   updateVersion,
   unRegister,
+  getBySocket,
   get: id => Client.get(id) || null
 };

@@ -14,19 +14,17 @@ function leave(docId, ws){
     }
 }
 
-function broadCast(docId, msg) {
+function broadCast(docId, msg, filter = () => true) {
   const room = rooms.get(docId);
-  if (!room || room.size === 0) return;
+  if (!room) return;
 
   const data = JSON.stringify(msg);
   for (const ws of room) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    }
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    if (!filter(ws)) continue;
+    ws.send(data);
   }
 }
-
-
 
 module.exports = {
     join,

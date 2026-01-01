@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './DocumentManagerComponent.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL;
@@ -14,6 +15,7 @@ const DocumentManagerComponent = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const navigate = useNavigate();
 
   const apiCall = async (endpoint, method = 'GET', body = null) => {
     try {
@@ -192,6 +194,10 @@ const DocumentManagerComponent = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  const handleManageDocument = (docId) => {
+    navigate(`/editor/${docId}`)
+  }
+
   return (
     <div className="document-manager">
       <div className="container-fluid">
@@ -271,6 +277,12 @@ const DocumentManagerComponent = () => {
                           </small>
                         </div>
                         <div className="document-actions">
+                          <button
+                            className="btn btn-sm btn-outline-primary me-2"
+                            onClick={() => handleManageDocument(doc.id)}
+                          >
+                            Manage document
+                          </button>
                           <button
                             className="btn btn-sm btn-outline-primary me-2"
                             onClick={() => fetchEditors(doc.id)}

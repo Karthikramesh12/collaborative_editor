@@ -114,11 +114,6 @@ if (payload.type !== "op") return;
     return ws.close(4001, "CLIENT_ID_SPOOF");
   }
 
-  if (!flow.canSend(clientId)) {
-    console.error(`[WS] Flow control blocked client`);
-    return ws.close(4002, "FLOOD");
-  }
-
   console.log(`[WS] Pushing operation to batch buffer for client ${clientId.substring(0, 8)}`);
 
   await push(clientId, op, async (singleOp) => {
@@ -130,11 +125,14 @@ if (payload.type !== "op") return;
   registry.updateVersion(realClientId, result.version);
 
   rooms.broadCast(documentId, {
-    type: "op",
-    serverSeq: result.serverSeq,
-    version: result.version,
-    op: result.op
-  }, c => registry.isLive(c.clientId));
+  type: "op",
+  serverSeq: result.serverSeq,
+  version: result.version,
+  op: result.op
+}, ws => {
+  const meta = registry.getBySocket(ws);
+  return meta && registry.isLive(meta.clientId);
+});
 
   const target = registry.get(realClientId);
   if (target) {

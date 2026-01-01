@@ -45,6 +45,8 @@ export default function AuthComponent() {
 
       if (data.success) {
         localStorage.setItem("auth_token", data.data.user.token);
+        localStorage.setItem("client_id", data.data.user.user.id);
+        console.log("client ID: ", localStorage.getItem(("client_id")));
         navigate("/dashboard");
       } else {
         setError(data.message || 'An error occurred');
