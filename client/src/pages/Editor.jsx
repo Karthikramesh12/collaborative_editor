@@ -2,12 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 
 const WEBSOCKET_URL = import.meta.env.VITE_WS_URL;
-console.log(WEBSOCKET_URL);
 
 const CollabEditor = () => {
   const { docId } = useParams();
   const documentId = docId;
-  
+
   // State
   const [content, setContent] = useState('');
   const [status, setStatus] = useState('disconnected');
@@ -20,25 +19,29 @@ const CollabEditor = () => {
   });
   const [logs, setLogs] = useState([]);
   const [pendingRemoteOps, setPendingRemoteOps] = useState([]);
+  const [otherCursors, setOtherCursors] = useState([]); // Other users' cursors
   
   // Refs
   const wsRef = useRef(null);
   const clientIdRef = useRef('');
   const seqRef = useRef(1);
-  const nextBaseVersionRef = useRef(0);
+  const versionRef = useRef(0);
   const lastAckVersionRef = useRef(0);
   const snapshotVersionRef = useRef(0);
   const pendingOpsRef = useRef(0);
   const opsSentRef = useRef(0);
   const acksReceivedRef = useRef(0);
   const contentRef = useRef('');
-  
-  // Initialize clientId - FIXED: generate if not exists
+  const textareaRef = useRef(null);
+  const sentOpsMapRef = useRef(new Map());
+  const lastCursorUpdateRef = useRef(0);
+  const currentCursorPosRef = useRef(0);
+
+  // Initialize clientId
   useEffect(() => {
     let clientId = localStorage.getItem('client_id');
     
     if (!clientId) {
-      // Generate a simple clientId (similar to your test but not the exact same)
       clientId = `client_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
       localStorage.setItem('client_id', clientId);
     }
@@ -46,17 +49,17 @@ const CollabEditor = () => {
     clientIdRef.current = clientId;
     addLog(`Client ID: ${clientId}`);
   }, []);
-  
+
   // Update content ref when content changes
   useEffect(() => {
     contentRef.current = content;
   }, [content]);
-  
+
   const addLog = useCallback((message) => {
     setLogs(prev => [...prev.slice(-50), `[${new Date().toLocaleTimeString()}] ${message}`]);
     console.log(message);
   }, []);
-  
+
   const updateStats = useCallback(() => {
     setConnectionStats({
       opsSent: opsSentRef.current,
@@ -66,184 +69,208 @@ const CollabEditor = () => {
       pendingOps: pendingOpsRef.current
     });
   }, []);
-  
+
   // Apply operation to content
   const applyOpToContent = useCallback((currentContent, op) => {
-  if (op.type === 'insert') {
-    const pos = Math.min(op.pos, currentContent.length);
-    const before = currentContent.substring(0, pos);
-    const after = currentContent.substring(pos);
-    return before + (op.text || '') + after;
-  } else if (op.type === 'delete') {
-    const pos = Math.min(op.pos, currentContent.length - 1);
-    const length = op.length || 1;
-    if (pos >= 0 && pos + length <= currentContent.length) {
+    console.log('applyOpToContent:', { op, currentContentLength: currentContent.length });
+    
+    if (op.type === 'insert') {
+      const pos = Math.min(op.pos, currentContent.length);
       const before = currentContent.substring(0, pos);
-      const after = currentContent.substring(pos + length);
-      return before + after;
+      const after = currentContent.substring(pos);
+      return before + (op.text || '') + after;
+      
+    } else if (op.type === 'delete') {
+      const pos = Math.min(op.pos, currentContent.length - 1);
+      const length = op.length || 1;
+      if (pos >= 0 && pos + length <= currentContent.length) {
+        const before = currentContent.substring(0, pos);
+        const after = currentContent.substring(pos + length);
+        return before + after;
+      }
     }
-  }
-  return currentContent;
-}, []);
-  
-  // Apply remote operation
-  const applyRemoteOperation = useCallback((remoteOp) => {
-    if (remoteOp.clientId === clientIdRef.current) {
+    
+    return currentContent;
+  }, []);
+
+  // Send cursor position to server
+  const sendCursorPosition = useCallback((position) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       return;
     }
     
-    if (remoteOp.baseVersion === nextBaseVersionRef.current) {
-      setContent(prev => applyOpToContent(prev, remoteOp));
-      nextBaseVersionRef.current++;
-      addLog(`✓ Applied remote op from ${remoteOp.clientId?.substring(0, 8)}: ${remoteOp.type} "${remoteOp.text || ''}" at ${remoteOp.pos}`);
-      
-      applyPendingOps();
-    } else {
-      addLog(`⏳ Queueing remote op (base: ${remoteOp.baseVersion}, expected: ${nextBaseVersionRef.current})`);
-      setPendingRemoteOps(prev => [...prev, remoteOp].sort((a, b) => a.baseVersion - b.baseVersion));
+    // Throttle cursor updates (max once every 100ms)
+    const now = Date.now();
+    if (now - lastCursorUpdateRef.current < 100) {
+      return;
     }
-  }, [addLog, applyOpToContent]);
-  
-  // Apply pending operations
-  const applyPendingOps = useCallback(() => {
-    setPendingRemoteOps(prev => {
-      const newPending = [...prev];
-      
-      while (newPending.length > 0 && newPending[0].baseVersion === nextBaseVersionRef.current) {
-        const op = newPending.shift();
-        setContent(prevContent => applyOpToContent(prevContent, op));
-        nextBaseVersionRef.current++;
-      }
-      
-      return newPending;
+    lastCursorUpdateRef.current = now;
+    
+    currentCursorPosRef.current = position;
+    
+    wsRef.current.send(JSON.stringify({
+      type: 'cursor',
+      pos: position,
+      clientId: clientIdRef.current,
+      documentId: documentId
+    }));
+    
+  }, [documentId]);
+
+  // Apply remote operation
+  const applyRemoteOperation = useCallback((remoteOp) => {
+    console.log('applyRemoteOperation:', remoteOp);
+    
+    // Skip our own ops (they're already applied optimistically)
+    if (remoteOp.clientId === clientIdRef.current) {
+      console.log('Skipping own op');
+      return;
+    }
+
+    addLog(`← Remote op from ${remoteOp.clientId?.substring(0, 8)}: ${remoteOp.type} "${remoteOp.text || ''}" at ${remoteOp.pos}`);
+
+    // Apply the operation directly
+    setContent(prev => {
+      const newContent = applyOpToContent(prev, remoteOp);
+      console.log('Applied remote, new content:', newContent);
+      return newContent;
     });
-  }, [applyOpToContent]);
-  
+    
+    // Update version
+    versionRef.current = Math.max(versionRef.current, remoteOp.baseVersion + 1);
+    
+  }, [addLog, applyOpToContent]);
+
   // Send operation
   const sendOperation = useCallback((op) => {
-  if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-    addLog('Cannot send op: WebSocket not connected');
-    return;
-  }
-  
-  // Build operation according to server protocol
-  const fullOp = {
-    ...op,
-    clientId: clientIdRef.current,
-    baseVersion: nextBaseVersionRef.current,
-    opId: `${clientIdRef.current}:${seqRef.current}`
-  };
-  
-  // Ensure delete operations have length property
-  if (op.type === 'delete') {
-    // Default to deleting 1 character if length not specified
-    fullOp.length = op.length || 1;
-  }
-  
-  addLog(`→ Sending op: ${op.type} "${op.text || ''}" at pos ${op.pos}, base:${nextBaseVersionRef.current}, seq:${seqRef.current}${op.type === 'delete' ? `, length:${fullOp.length}` : ''}`);
-  
-  wsRef.current.send(JSON.stringify({
-    type: 'op',
-    op: fullOp
-  }));
-  
-  seqRef.current++;
-  nextBaseVersionRef.current++;
-  opsSentRef.current++;
-  pendingOpsRef.current++;
-  updateStats();
-}, [addLog, updateStats]);
-  
-  // Handle text changes
-  // Handle text changes
-const handleTextChange = useCallback((newContent) => {
-  const oldContent = contentRef.current;
-  
-  if (newContent === oldContent) {
-    return;
-  }
-  
-  // Find the first position where strings differ
-  let pos = 0;
-  const minLength = Math.min(oldContent.length, newContent.length);
-  
-  while (pos < minLength && oldContent[pos] === newContent[pos]) {
-    pos++;
-  }
-  
-  if (newContent.length > oldContent.length) {
-    // Insertion
-    const insertedText = newContent.substring(pos, pos + (newContent.length - oldContent.length));
-    
-    sendOperation({
-      type: 'insert',
-      pos,
-      text: insertedText
-    });
-    
-    setContent(newContent);
-    
-  } else if (newContent.length < oldContent.length) {
-    // Deletion - determine if it's backspace or delete key
-    const deletedLength = oldContent.length - newContent.length;
-    
-    // For simplicity, we'll send delete at the found position
-    // Most common case: backspace/delete at cursor position
-    sendOperation({
-      type: 'delete',
-      pos: pos, // Position where deletion starts
-      length: deletedLength // Number of characters deleted
-    });
-    
-    setContent(newContent);
-    
-  } else {
-    // Same length but different content (replace)
-    // Find end of differing section
-    let oldEnd = oldContent.length - 1;
-    let newEnd = newContent.length - 1;
-    
-    while (oldEnd >= pos && newEnd >= pos && 
-           oldContent[oldEnd] === newContent[newEnd]) {
-      oldEnd--;
-      newEnd--;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      addLog('Cannot send op: WebSocket not connected');
+      return;
     }
     
-    const deleteLength = oldEnd - pos + 1;
-    const insertText = newContent.substring(pos, newEnd + 1);
+    // Create operation with optimistic versioning
+    const opId = `${clientIdRef.current}:${seqRef.current}`;
+    const fullOp = {
+      ...op,
+      clientId: clientIdRef.current,
+      baseVersion: versionRef.current,
+      opId: opId
+    };
     
-    // Send delete first
-    sendOperation({
-      type: 'delete',
-      pos: pos,
-      length: deleteLength
-    });
+    // Ensure delete operations have length property
+    if (op.type === 'delete') {
+      fullOp.length = op.length || 1;
+    }
     
-    // Then send insert if needed
-    if (insertText.length > 0) {
-      // Small delay to ensure order
-      setTimeout(() => {
+    addLog(`→ Sending op: ${op.type} "${op.text || ''}" at pos ${op.pos}, base:${versionRef.current}, seq:${seqRef.current}`);
+    
+    // Store in map for deduplication
+    sentOpsMapRef.current.set(opId, fullOp);
+    
+    // Increment optimistic version IMMEDIATELY
+    versionRef.current++;
+    
+    wsRef.current.send(JSON.stringify({
+      type: 'op',
+      op: fullOp
+    }));
+    
+    seqRef.current++;
+    opsSentRef.current++;
+    pendingOpsRef.current++;
+    updateStats();
+    
+  }, [addLog, updateStats]);
+
+  // Handle text changes - SIMPLE OPTIMISTIC APPROACH
+  const handleTextChange = useCallback((newContent, cursorPosition) => {
+    const oldContent = contentRef.current;
+    
+    if (newContent === oldContent) {
+      return;
+    }
+    
+    console.log('Text change:', { oldLength: oldContent.length, newLength: newContent.length });
+    
+    // Send cursor position if provided
+    if (cursorPosition !== undefined) {
+      sendCursorPosition(cursorPosition);
+    }
+    
+    // SIMPLE DIFF: Character-by-character
+    if (newContent.length > oldContent.length) {
+      // Insertion
+      let pos = 0;
+      while (pos < oldContent.length && oldContent[pos] === newContent[pos]) {
+        pos++;
+      }
+      
+      const insertedText = newContent.substring(pos, pos + (newContent.length - oldContent.length));
+      
+      console.log('Insertion detected:', { pos, insertedText });
+      
+      // Apply optimistically
+      setContent(newContent);
+      
+      // Send operation
+      sendOperation({
+        type: 'insert',
+        pos: pos,
+        text: insertedText
+      });
+      
+    } else if (newContent.length < oldContent.length) {
+      // Deletion
+      let pos = 0;
+      while (pos < newContent.length && oldContent[pos] === newContent[pos]) {
+        pos++;
+      }
+      
+      const deletedLength = oldContent.length - newContent.length;
+      
+      console.log('Deletion detected:', { pos, deletedLength });
+      
+      // Apply optimistically
+      setContent(newContent);
+      
+      // Send operation
+      sendOperation({
+        type: 'delete',
+        pos: pos,
+        length: deletedLength
+      });
+      
+    } else {
+      // Same length - replacement (should be rare for typing)
+      let pos = 0;
+      while (pos < oldContent.length && oldContent[pos] === newContent[pos]) {
+        pos++;
+      }
+      
+      if (pos < oldContent.length) {
+        // Apply optimistically
+        setContent(newContent);
+        
+        // Send delete then insert
         sendOperation({
-          type: 'insert',
+          type: 'delete',
           pos: pos,
-          text: insertText
+          length: 1
         });
-      }, 10);
+        
+        setTimeout(() => {
+          sendOperation({
+            type: 'insert',
+            pos: pos,
+            text: newContent[pos]
+          });
+        }, 10);
+      }
     }
     
-    setContent(newContent);
-  }
-}, [sendOperation]);
-  
-  const findFirstDiffPos = (str1, str2) => {
-    const len = Math.min(str1.length, str2.length);
-    for (let i = 0; i < len; i++) {
-      if (str1[i] !== str2[i]) return i;
-    }
-    return len;
-  };
-  
-  // Connect to WebSocket - UPDATED with exact same logic as test script
+  }, [sendOperation, sendCursorPosition]);
+
+  // Connect to WebSocket
   const connect = useCallback(() => {
     if (!documentId) {
       addLog('Error: No documentId');
@@ -253,19 +280,16 @@ const handleTextChange = useCallback((newContent) => {
     setStatus('connecting');
     addLog(`Connecting to document: ${documentId}`);
     
-    // Build URL EXACTLY like the test script
     const wsUrl = `${WEBSOCKET_URL}?documentId=${documentId}&userId=${clientIdRef.current}`;
     addLog(`WebSocket URL: ${wsUrl}`);
     
     try {
-      // Create WebSocket - NO binaryType, just like test script
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       
       let connectionTimeout;
       let gotClientId = false;
       
-      // Set timeout exactly like test script (2000ms)
       connectionTimeout = setTimeout(() => {
         if (!gotClientId) {
           addLog('Connection timeout - no clientId received');
@@ -278,12 +302,12 @@ const handleTextChange = useCallback((newContent) => {
       
       ws.onopen = () => {
         addLog('✓ WebSocket connection opened');
-        // Don't send anything - server should initiate
       };
       
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          console.log('Received message:', msg.type, msg);
           addLog(`Received type: ${msg.type}`);
           
           switch (msg.type) {
@@ -302,13 +326,13 @@ const handleTextChange = useCallback((newContent) => {
                 snapshotVersionRef.current = msg.snapshot.version;
                 const snapshotContent = msg.snapshot.content || '';
                 setContent(snapshotContent);
-                nextBaseVersionRef.current = msg.snapshot.version;
+                versionRef.current = msg.snapshot.version;
+                sentOpsMapRef.current.clear();
+                setOtherCursors([]);
                 
                 addLog(`✓ Received snapshot v${msg.snapshot.version}, length: ${snapshotContent.length} chars`);
                 
-                // Send snapshot acknowledgement EXACTLY like test script
                 ws.send(JSON.stringify({ type: 'snapshotAck' }));
-                
                 setStatus('connected');
               }
               break;
@@ -318,15 +342,44 @@ const handleTextChange = useCallback((newContent) => {
               lastAckVersionRef.current = msg.version || 0;
               pendingOpsRef.current = Math.max(0, pendingOpsRef.current - 1);
               
-              addLog(`✓ Ack received: ${msg.opId} → v${msg.version} (total: ${acksReceivedRef.current})`);
+              // Remove from sent ops map
+              if (msg.op && msg.op.opId) {
+                sentOpsMapRef.current.delete(msg.op.opId);
+              }
+              
+              // Update version to match server
+              if (msg.version > versionRef.current) {
+                versionRef.current = msg.version;
+              }
+              
+              addLog(`✓ Ack received: v${msg.version} (total: ${acksReceivedRef.current})`);
               updateStats();
               break;
               
             case 'op':
-              if (msg.op && msg.op.clientId !== clientIdRef.current) {
-                addLog(`← Remote op from ${msg.op.clientId?.substring(0, 8)}: ${msg.op.type} "${msg.op.text || ''}" at ${msg.op.pos}`);
-                applyRemoteOperation(msg.op);
+              if (msg.op) {
+                // Check if this is our own op (deduplication)
+                const opId = msg.op.opId;
+                if (opId && opId.startsWith(clientIdRef.current)) {
+                  console.log('Skipping own broadcasted op:', opId);
+                } else {
+                  applyRemoteOperation(msg.op);
+                }
               }
+              
+              // Update cursors if included
+              if (msg.cursors) {
+                const otherUserCursors = msg.cursors.filter(c => c.clientId !== clientIdRef.current);
+                setOtherCursors(otherUserCursors);
+                console.log('Updated other cursors:', otherUserCursors);
+              }
+              break;
+              
+            case 'cursors':
+              // Handle cursor updates
+              const otherUserCursors = msg.cursors.filter(c => c.clientId !== clientIdRef.current);
+              setOtherCursors(otherUserCursors);
+              console.log('Received cursor updates:', otherUserCursors);
               break;
               
             case 'error':
@@ -344,26 +397,12 @@ const handleTextChange = useCallback((newContent) => {
       
       ws.onerror = (event) => {
         addLog(`✗ WebSocket error occurred`);
-        
-        // Try to get more error details
-        if (event && event.type) {
-          addLog(`Error type: ${event.type}`);
-        }
-        
         setStatus('disconnected');
         clearTimeout(connectionTimeout);
       };
       
       ws.onclose = (event) => {
         addLog(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason || 'No reason'}, Clean: ${event.wasClean}`);
-        
-        if (event.code === 1006) {
-          addLog('⚠ Abnormal closure. Possible causes:');
-          addLog('  1. Server not running on localhost:3000');
-          addLog('  2. CORS issue with WebSocket');
-          addLog('  3. Invalid WebSocket URL');
-        }
-        
         setStatus('disconnected');
         clearTimeout(connectionTimeout);
       };
@@ -374,7 +413,7 @@ const handleTextChange = useCallback((newContent) => {
     }
     
   }, [documentId, addLog, applyRemoteOperation, updateStats]);
-  
+
   // Disconnect
   const disconnect = useCallback(() => {
     if (wsRef.current) {
@@ -384,7 +423,7 @@ const handleTextChange = useCallback((newContent) => {
       addLog('Disconnected manually');
     }
   }, [addLog]);
-  
+
   // Reconnect
   const reconnect = useCallback(() => {
     if (status === 'connected') {
@@ -397,7 +436,7 @@ const handleTextChange = useCallback((newContent) => {
       connect();
     }, 1000);
   }, [status, disconnect, connect, addLog]);
-  
+
   // Send test operations
   const sendTestOperations = useCallback(() => {
     addLog('Sending 10 test operations...');
@@ -406,18 +445,17 @@ const handleTextChange = useCallback((newContent) => {
       setTimeout(() => {
         sendOperation({
           type: 'insert',
-          pos: contentRef.current.length + i,
+          pos: contentRef.current.length,
           text: 'X'
         });
       }, i * 100);
     }
   }, [sendOperation, addLog]);
-  
-  // Test connection first
+
+  // Test connection
   const testConnection = useCallback(() => {
     addLog('Testing WebSocket connection...');
     
-    // First, check if we can create a simple WebSocket
     const testWs = new WebSocket('ws://localhost:3000');
     
     testWs.onopen = () => {
@@ -427,24 +465,17 @@ const handleTextChange = useCallback((newContent) => {
     
     testWs.onerror = (error) => {
       addLog('✗ Cannot connect to WebSocket server at ws://localhost:3000');
-      addLog('Make sure the server is running:');
-      addLog('  1. Go to your server directory');
-      addLog('  2. Run: npm start (or node server.js)');
-      addLog('  3. Check if port 3000 is available');
     };
     
     testWs.onclose = () => {
       addLog('Test connection closed');
     };
   }, [addLog]);
-  
+
   // Auto-connect on mount
   useEffect(() => {
     if (documentId && status === 'disconnected') {
-      // Test connection first
       testConnection();
-      
-      // Then try to connect after a short delay
       setTimeout(() => {
         connect();
       }, 500);
@@ -456,7 +487,53 @@ const handleTextChange = useCallback((newContent) => {
       }
     };
   }, [documentId]);
-  
+
+  // Render other users' cursors
+  const renderOtherCursors = () => {
+    if (otherCursors.length === 0) return null;
+    
+    return (
+      <div className="other-cursors" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}>
+        {otherCursors.map((cursor, index) => {
+          const color = `hsl(${(index * 60) % 360}, 70%, 50%)`;
+          return (
+            <div 
+              key={`${cursor.clientId}-${index}`}
+              className="cursor-marker"
+              style={{
+                position: 'absolute',
+                left: `${Math.min(cursor.pos, 100) * 8}px`, // Approximate positioning
+                top: '10px',
+                backgroundColor: color,
+                width: '2px',
+                height: '20px',
+                opacity: 0.7,
+                zIndex: 2
+              }}
+              title={`User: ${cursor.clientId.substring(0, 8)}`}
+            >
+              <div 
+                style={{
+                  position: 'absolute',
+                  top: '-20px',
+                  left: '-5px',
+                  backgroundColor: color,
+                  color: 'white',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  fontSize: '10px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {cursor.clientId.substring(0, 8)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   if (!documentId) {
     return (
       <div className="container mt-4">
@@ -481,16 +558,22 @@ const handleTextChange = useCallback((newContent) => {
       <div className="alert alert-info mb-3">
         <h5 className="alert-heading">Debug Information</h5>
         <div className="row">
-          <div className="col-md-4">
+          <div className="col-md-3">
             <strong>Document:</strong> <code>{documentId}</code>
           </div>
-          <div className="col-md-4">
-            <strong>Client ID:</strong> <code>{clientIdRef.current}</code>
+          <div className="col-md-3">
+            <strong>Client ID:</strong> <code>{clientIdRef.current.substring(0, 12)}...</code>
           </div>
-          <div className="col-md-4">
-            <strong>Status:</strong> 
+          <div className="col-md-3">
+            <strong>Status:</strong>
             <span className={`badge ${statusBadgeClass} ms-2`}>
               {status.toUpperCase()}
+            </span>
+          </div>
+          <div className="col-md-3">
+            <strong>Other Users:</strong>
+            <span className="badge bg-info ms-2">
+              {otherCursors.length}
             </span>
           </div>
         </div>
@@ -504,7 +587,6 @@ const handleTextChange = useCallback((newContent) => {
           </button>
           <button 
             onClick={() => {
-              // Force reload client ID
               const newClientId = `client_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
               localStorage.setItem('client_id', newClientId);
               clientIdRef.current = newClientId;
@@ -567,26 +649,52 @@ const handleTextChange = useCallback((newContent) => {
             </span>
             {pendingRemoteOps.length > 0 && (
               <span className="badge bg-warning text-dark">
-                Pending: {pendingRemoteOps.length}
+                Pending Remote: {pendingRemoteOps.length}
+              </span>
+            )}
+            {otherCursors.length > 0 && (
+              <span className="badge bg-info">
+                {otherCursors.length} other user{otherCursors.length !== 1 ? 's' : ''}
               </span>
             )}
           </div>
           
-          <div className="card mb-4">
-            <div className="card-body p-0">
+          <div className="card mb-4" style={{ position: 'relative' }}>
+            <div className="card-body p-0" style={{ position: 'relative' }}>
+              {renderOtherCursors()}
               <textarea
+                ref={textareaRef}
                 value={content}
-                onChange={(e) => handleTextChange(e.target.value)}
+                onChange={(e) => {
+                  const cursorPos = e.target.selectionStart;
+                  handleTextChange(e.target.value, cursorPos);
+                }}
+                onSelect={(e) => {
+                  sendCursorPosition(e.target.selectionStart);
+                }}
+                onClick={(e) => {
+                  sendCursorPosition(e.target.selectionStart);
+                }}
+                onKeyUp={(e) => {
+                  sendCursorPosition(e.target.selectionStart);
+                }}
                 disabled={status !== 'connected'}
                 className="form-control border-0"
                 style={{ 
                   height: '400px', 
                   fontFamily: 'monospace', 
                   fontSize: '16px',
-                  resize: 'vertical'
+                  resize: 'vertical',
+                  position: 'relative',
+                  zIndex: 1
                 }}
                 placeholder={status !== 'connected' ? "Connect to the server to start editing..." : "Start typing here. Changes will sync with other users..."}
               />
+            </div>
+            <div className="card-footer">
+              <small className="text-muted">
+                Length: {content.length} characters | Version: {versionRef.current}
+              </small>
             </div>
           </div>
           
@@ -666,27 +774,10 @@ const handleTextChange = useCallback((newContent) => {
             </div>
             <div className="card-footer bg-secondary">
               <small className="text-light">
-                Base: {nextBaseVersionRef.current} | Seq: {seqRef.current} | Pending: {pendingOpsRef.current}
+                Version: {versionRef.current} | Seq: {seqRef.current} | Pending: {pendingOpsRef.current}
               </small>
             </div>
           </div>
-        </div>
-      </div>
-      
-      {/* Troubleshooting Tips */}
-      <div className="card mt-4">
-        <div className="card-header">
-          <h5 className="mb-0">Troubleshooting</h5>
-        </div>
-        <div className="card-body">
-          <p>If you're getting WebSocket errors (code 1006):</p>
-          <ol>
-            <li>Make sure your collaboration server is running: <code>npm start</code> in server directory</li>
-            <li>Check if port 3000 is available and not blocked</li>
-            <li>Try clicking "Test Connection" button above</li>
-            <li>Try "New Client ID" if there are authentication issues</li>
-            <li>Check browser console for CORS errors</li>
-          </ol>
         </div>
       </div>
     </div>
