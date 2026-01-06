@@ -1,23 +1,18 @@
 const rooms = new Map();
 
-function join(docId, ws){
-    if (!rooms.has(docId)){
-        rooms.set(docId, new Set());
-    }
-    rooms.get(docId).add(ws);
+function join(fileId, ws){
+  if (!rooms.has(fileId)) rooms.set(fileId, new Set());
+  rooms.get(fileId).add(ws);
 }
 
-function leave(docId, ws){
-    rooms.get(docId)?.delete(ws);
-    if (rooms.get(docId)?.size === 0){
-        rooms.delete(docId);
-    }
+function leave(fileId, ws){
+  rooms.get(fileId)?.delete(ws);
+  if (rooms.get(fileId)?.size === 0) rooms.delete(fileId);
 }
 
-function broadCast(docId, msg, filter = () => true) {
-  const room = rooms.get(docId);
+function broadCast(fileId, msg, filter = () => true) {
+  const room = rooms.get(fileId);
   if (!room) return;
-
   const data = JSON.stringify(msg);
   for (const ws of room) {
     if (ws.readyState !== WebSocket.OPEN) continue;
@@ -26,8 +21,4 @@ function broadCast(docId, msg, filter = () => true) {
   }
 }
 
-module.exports = {
-    join,
-    leave, 
-    broadCast
-}
+module.exports = { join, leave, broadCast };

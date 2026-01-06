@@ -1,11 +1,11 @@
-const store = require('../memory/document.store.js');
+const store = require('../memory/file.store.js');
 const Rebase = require('./rebase.js');
 const registry = require('../sessions/client.registry.js');
 const Cursor = require('../sessions/presence.registry.js');
 const { rebaseCursor } = require('./cursor.rebase.js');
-const opLogRepo = require('../persistence/opLog.repo.js');
-const snapper = require('./snapshot.manager.js');
-const snapShot = require('../persistence/snapshot.repo.js');
+const opLogRepo = require('../persistence/fileOpLog.repo.js');
+const snapper = require('./fileSnapshot.manager.js');
+const snapShot = require('../persistence/fileSnapshot.repo.js');
 
 class CollabEngine {
   async submitOperation(documentId, op, clientId) {

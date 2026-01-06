@@ -3,9 +3,9 @@ const Dedup = require('../memory/dedup.store.js');
 const rooms = require('../gateway/WebSockect/ws.room.js');
 const { apply, validate } = require('./operations.js');
 
-class DocumentState {
-  constructor(documentId, initialContent = "") {
-    this.documentId = documentId;
+class FileState {
+  constructor(fileId, initialContent = "") {
+    this.fileId = fileId;
     this.content = initialContent;
     this.version = 0;
     this.serverSeq = 0;
@@ -16,7 +16,7 @@ class DocumentState {
 
   getSnapShot() {
     return {
-      documentId: this.documentId,
+      fileId: this.fileId,
       version: this.version,
       serverSeq: this.serverSeq,
       content: this.content
@@ -42,11 +42,11 @@ class DocumentState {
   }
 
   clone() {
-  const c = new DocumentState(this.documentId, this.content);
-  c.version = this.version;
-  c.serverSeq = this.serverSeq;
-  return c;
-}
+    const c = new FileState(this.fileId, this.content);
+    c.version = this.version;
+    c.serverSeq = this.serverSeq;
+    return c;
+  }
 }
 
-module.exports = DocumentState;
+module.exports = FileState;

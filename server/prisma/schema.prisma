@@ -22,6 +22,8 @@ model User {
   authProviders AuthProvider[]
   documents     Document[] @relation("OwnedDocuments")
   edits         Editor[]
+  workspace     Workspace[]   @relation("OwnerWorkspace")
+  workspaceMember WorkspaceMember[]
 
   @@index([email])
 }
@@ -85,6 +87,72 @@ model OperationLog {
   @@index([documentId, version])
 }
 
+model Workspace {
+  id                String    @id  @default(cuid())
+  name              String
+  ownerId           String
+  status            WorkspaceStaus @default(ACTIVE)
+  mountPath         String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  owner             User           @relation("OwnerWorkspace", fields: [ownerId], references: [id])
+  members           WorkspaceMember[]
+  files             File[]
+}
+
+model WorkspaceMember {
+  id                      String    @id  @default(cuid())
+  workspaceId             String
+  userId                  String
+  role                    WorkspaceRole
+
+  user                    User      @relation(fields: [userId], references: [id])
+  workspace               Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@unique([workspaceId, userId])
+}
+
+model File {
+  id          String    @id @default(cuid())
+  workspaceId String
+  path        String
+  version     Int       @default(0)
+  currentHash String
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  fileSnapshot  FileSnapshot[]
+  fileOpLogs    FileOplogs[]
+
+  @@unique([workspaceId, path])
+}
+
+model FileSnapshot {
+  id              String  @id @default(cuid())
+  fileId          String
+  version         Int
+  hash            String
+  content         String
+  createdAt       DateTime    @default(now())
+
+  file            File        @relation(fields: [fileId], references: [id])
+
+  @@index([fileId, version])
+}
+
+model FileOplogs {
+  id                String    @id  @default(cuid())
+  fileId            String
+  serverSeq         Int
+  op                Json
+  createdAt         DateTime       @default(now())
+
+  file              File           @relation(fields: [fileId], references: [id])
+
+  @@unique([fileId, serverSeq])
+}
+
 enum EditorRole {
   OWNER
   EDITOR
@@ -96,8 +164,15 @@ enum AuthType {
   GOOGLE
   GITHUB
 }
-model Add_document_snapshot_and_operation_log {
-  id          String   @id @default(cuid())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+enum WorkspaceStaus {
+  ACTIVE
+  STOPPED
+  DELETED
+}
+
+enum WorkspaceRole {
+  OWNER
+  EDITOR
+  VIEWER
 }
