@@ -18,8 +18,10 @@ const CollabEditor = () => {
     pendingOps: 0
   });
   const [logs, setLogs] = useState([]);
-  const [pendingRemoteOps, setPendingRemoteOps] = useState([]);
-  const [otherCursors, setOtherCursors] = useState([]); // Other users' cursors
+  
+  // New dual cursor system
+  const [myCursorPos, setMyCursorPos] = useState(0); // Your cursor position
+  const [remoteCursors, setRemoteCursors] = useState({}); // Other users' cursors {clientId: {pos, color, name}}
   
   // Refs
   const wsRef = useRef(null);
@@ -35,7 +37,7 @@ const CollabEditor = () => {
   const textareaRef = useRef(null);
   const sentOpsMapRef = useRef(new Map());
   const lastCursorUpdateRef = useRef(0);
-  const currentCursorPosRef = useRef(0);
+  const isTextareaFocusedRef = useRef(false);
 
   // Initialize clientId
   useEffect(() => {
@@ -70,6 +72,17 @@ const CollabEditor = () => {
     });
   }, []);
 
+  // Helper to generate consistent color for each user
+  const getUserColor = useCallback((clientId) => {
+    const colors = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+      '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
+      '#F1948A', '#82E0AA', '#85C1E9', '#D7BDE2', '#F8C471'
+    ];
+    const hash = clientId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[hash % colors.length];
+  }, []);
+
   // Apply operation to content
   const applyOpToContent = useCallback((currentContent, op) => {
     console.log('applyOpToContent:', { op, currentContentLength: currentContent.length });
@@ -93,6 +106,26 @@ const CollabEditor = () => {
     return currentContent;
   }, []);
 
+  // Rebase local cursor based on remote operation
+  const rebaseLocalCursor = useCallback((currentPos, op) => {
+    if (op.type === 'insert' && op.pos <= currentPos) {
+      return currentPos + (op.text?.length || 0);
+    }
+    
+    if (op.type === 'delete' && op.pos < currentPos) {
+      const deleteLength = op.length || 1;
+      const deleteEnd = op.pos + deleteLength;
+      
+      if (currentPos <= deleteEnd) {
+        return op.pos; // Cursor was inside deleted text
+      } else {
+        return currentPos - deleteLength;
+      }
+    }
+    
+    return currentPos;
+  }, []);
+
   // Send cursor position to server
   const sendCursorPosition = useCallback((position) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -106,7 +139,7 @@ const CollabEditor = () => {
     }
     lastCursorUpdateRef.current = now;
     
-    currentCursorPosRef.current = position;
+    setMyCursorPos(position);
     
     wsRef.current.send(JSON.stringify({
       type: 'cursor',
@@ -129,17 +162,28 @@ const CollabEditor = () => {
 
     addLog(`← Remote op from ${remoteOp.clientId?.substring(0, 8)}: ${remoteOp.type} "${remoteOp.text || ''}" at ${remoteOp.pos}`);
 
-    // Apply the operation directly
+    // Apply the operation to content
     setContent(prev => {
       const newContent = applyOpToContent(prev, remoteOp);
-      console.log('Applied remote, new content:', newContent);
       return newContent;
     });
+    
+    // Rebase local cursor if textarea is focused
+    if (isTextareaFocusedRef.current && textareaRef.current) {
+      const newPos = rebaseLocalCursor(myCursorPos, remoteOp);
+      setMyCursorPos(newPos);
+      
+      // Update textarea cursor position
+      if (textareaRef.current === document.activeElement) {
+        textareaRef.current.selectionStart = newPos;
+        textareaRef.current.selectionEnd = newPos;
+      }
+    }
     
     // Update version
     versionRef.current = Math.max(versionRef.current, remoteOp.baseVersion + 1);
     
-  }, [addLog, applyOpToContent]);
+  }, [addLog, applyOpToContent, rebaseLocalCursor, myCursorPos]);
 
   // Send operation
   const sendOperation = useCallback((op) => {
@@ -149,7 +193,7 @@ const CollabEditor = () => {
     }
     
     // Create operation with optimistic versioning
-    const opId = `${clientIdRef.current}:${seqRef.current}`;
+    const opId = `${clientIdRef.current}:${Date.now()}:${seqRef.current}`;
     const fullOp = {
       ...op,
       clientId: clientIdRef.current,
@@ -162,14 +206,30 @@ const CollabEditor = () => {
       fullOp.length = op.length || 1;
     }
     
-    addLog(`→ Sending op: ${op.type} "${op.text || ''}" at pos ${op.pos}, base:${versionRef.current}, seq:${seqRef.current}`);
+    addLog(`→ Sending op: ${op.type} "${op.text || ''}" at pos ${op.pos}, base:${versionRef.current}`);
+    
+    // Apply optimistically
+    setContent(prev => applyOpToContent(prev, fullOp));
+    
+    // Update local cursor position for insert/delete
+    if (fullOp.type === 'insert' && fullOp.pos <= myCursorPos) {
+      const newPos = myCursorPos + (fullOp.text?.length || 0);
+      setMyCursorPos(newPos);
+    } else if (fullOp.type === 'delete' && fullOp.pos < myCursorPos) {
+      const deleteEnd = fullOp.pos + (fullOp.length || 1);
+      let newPos = myCursorPos;
+      if (myCursorPos <= deleteEnd) {
+        newPos = fullOp.pos;
+      } else {
+        newPos = myCursorPos - (fullOp.length || 1);
+      }
+      setMyCursorPos(newPos);
+    }
     
     // Store in map for deduplication
     sentOpsMapRef.current.set(opId, fullOp);
     
-    // Increment optimistic version IMMEDIATELY
-    versionRef.current++;
-    
+    // Send to server
     wsRef.current.send(JSON.stringify({
       type: 'op',
       op: fullOp
@@ -180,9 +240,9 @@ const CollabEditor = () => {
     pendingOpsRef.current++;
     updateStats();
     
-  }, [addLog, updateStats]);
+  }, [addLog, applyOpToContent, myCursorPos, updateStats]);
 
-  // Handle text changes - SIMPLE OPTIMISTIC APPROACH
+  // Handle text changes
   const handleTextChange = useCallback((newContent, cursorPosition) => {
     const oldContent = contentRef.current;
     
@@ -192,12 +252,13 @@ const CollabEditor = () => {
     
     console.log('Text change:', { oldLength: oldContent.length, newLength: newContent.length });
     
-    // Send cursor position if provided
+    // Update local cursor
     if (cursorPosition !== undefined) {
+      setMyCursorPos(cursorPosition);
       sendCursorPosition(cursorPosition);
     }
     
-    // SIMPLE DIFF: Character-by-character
+    // Calculate operation
     if (newContent.length > oldContent.length) {
       // Insertion
       let pos = 0;
@@ -208,9 +269,6 @@ const CollabEditor = () => {
       const insertedText = newContent.substring(pos, pos + (newContent.length - oldContent.length));
       
       console.log('Insertion detected:', { pos, insertedText });
-      
-      // Apply optimistically
-      setContent(newContent);
       
       // Send operation
       sendOperation({
@@ -230,42 +288,12 @@ const CollabEditor = () => {
       
       console.log('Deletion detected:', { pos, deletedLength });
       
-      // Apply optimistically
-      setContent(newContent);
-      
       // Send operation
       sendOperation({
         type: 'delete',
         pos: pos,
         length: deletedLength
       });
-      
-    } else {
-      // Same length - replacement (should be rare for typing)
-      let pos = 0;
-      while (pos < oldContent.length && oldContent[pos] === newContent[pos]) {
-        pos++;
-      }
-      
-      if (pos < oldContent.length) {
-        // Apply optimistically
-        setContent(newContent);
-        
-        // Send delete then insert
-        sendOperation({
-          type: 'delete',
-          pos: pos,
-          length: 1
-        });
-        
-        setTimeout(() => {
-          sendOperation({
-            type: 'insert',
-            pos: pos,
-            text: newContent[pos]
-          });
-        }, 10);
-      }
     }
     
   }, [sendOperation, sendCursorPosition]);
@@ -328,7 +356,8 @@ const CollabEditor = () => {
                 setContent(snapshotContent);
                 versionRef.current = msg.snapshot.version;
                 sentOpsMapRef.current.clear();
-                setOtherCursors([]);
+                setRemoteCursors({});
+                setMyCursorPos(0);
                 
                 addLog(`✓ Received snapshot v${msg.snapshot.version}, length: ${snapshotContent.length} chars`);
                 
@@ -367,19 +396,39 @@ const CollabEditor = () => {
                 }
               }
               
-              // Update cursors if included
+              // Update remote cursors
               if (msg.cursors) {
-                const otherUserCursors = msg.cursors.filter(c => c.clientId !== clientIdRef.current);
-                setOtherCursors(otherUserCursors);
-                console.log('Updated other cursors:', otherUserCursors);
+                const newRemoteCursors = {};
+                msg.cursors.forEach(cursor => {
+                  if (cursor.clientId !== clientIdRef.current) {
+                    newRemoteCursors[cursor.clientId] = {
+                      pos: cursor.pos,
+                      color: getUserColor(cursor.clientId),
+                      clientId: cursor.clientId,
+                      name: cursor.clientId.substring(0, 8)
+                    };
+                  }
+                });
+                setRemoteCursors(newRemoteCursors);
+                console.log('Updated remote cursors:', Object.keys(newRemoteCursors).length);
               }
               break;
               
             case 'cursors':
-              // Handle cursor updates
-              const otherUserCursors = msg.cursors.filter(c => c.clientId !== clientIdRef.current);
-              setOtherCursors(otherUserCursors);
-              console.log('Received cursor updates:', otherUserCursors);
+              // Handle separate cursor updates
+              const newRemoteCursors = {};
+              msg.cursors.forEach(cursor => {
+                if (cursor.clientId !== clientIdRef.current) {
+                  newRemoteCursors[cursor.clientId] = {
+                    pos: cursor.pos,
+                    color: getUserColor(cursor.clientId),
+                    clientId: cursor.clientId,
+                    name: cursor.clientId.substring(0, 8)
+                  };
+                }
+              });
+              setRemoteCursors(newRemoteCursors);
+              console.log('Received cursor updates:', Object.keys(newRemoteCursors).length);
               break;
               
             case 'error':
@@ -404,6 +453,7 @@ const CollabEditor = () => {
       ws.onclose = (event) => {
         addLog(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason || 'No reason'}, Clean: ${event.wasClean}`);
         setStatus('disconnected');
+        setRemoteCursors({});
         clearTimeout(connectionTimeout);
       };
       
@@ -412,7 +462,7 @@ const CollabEditor = () => {
       setStatus('disconnected');
     }
     
-  }, [documentId, addLog, applyRemoteOperation, updateStats]);
+  }, [documentId, addLog, applyRemoteOperation, updateStats, getUserColor]);
 
   // Disconnect
   const disconnect = useCallback(() => {
@@ -420,6 +470,7 @@ const CollabEditor = () => {
       wsRef.current.close();
       wsRef.current = null;
       setStatus('disconnected');
+      setRemoteCursors({});
       addLog('Disconnected manually');
     }
   }, [addLog]);
@@ -488,44 +539,116 @@ const CollabEditor = () => {
     };
   }, [documentId]);
 
-  // Render other users' cursors
-  const renderOtherCursors = () => {
-    if (otherCursors.length === 0) return null;
+  // Track textarea focus
+  useEffect(() => {
+    const handleFocus = () => {
+      isTextareaFocusedRef.current = true;
+    };
+    
+    const handleBlur = () => {
+      isTextareaFocusedRef.current = false;
+    };
+    
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.addEventListener('focus', handleFocus);
+      textarea.addEventListener('blur', handleBlur);
+    }
+    
+    return () => {
+      if (textarea) {
+        textarea.removeEventListener('focus', handleFocus);
+        textarea.removeEventListener('blur', handleBlur);
+      }
+    };
+  }, []);
+
+  // Render your cursor
+  const renderMyCursor = () => {
+    if (!isTextareaFocusedRef.current) return null;
+    
+    // Calculate cursor position based on monospace font
+    const charsPerLine = 80; // Adjust based on your textarea width
+    const charWidth = 8; // Approximate character width
+    const lineHeight = 20; // Approximate line height
+    
+    const line = Math.floor(myCursorPos / charsPerLine);
+    const col = myCursorPos % charsPerLine;
     
     return (
-      <div className="other-cursors" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}>
-        {otherCursors.map((cursor, index) => {
-          const color = `hsl(${(index * 60) % 360}, 70%, 50%)`;
+      <div 
+        className="my-cursor"
+        style={{
+          position: 'absolute',
+          left: `${col * charWidth}px`,
+          top: `${line * lineHeight}px`,
+          backgroundColor: '#4CAF50',
+          width: '2px',
+          height: '20px',
+          zIndex: 3,
+          pointerEvents: 'none',
+          animation: 'blink 1s infinite'
+        }}
+        title="Your cursor"
+      />
+    );
+  };
+
+  // Render remote cursors
+  const renderRemoteCursors = () => {
+    const remoteCursorArray = Object.values(remoteCursors);
+    if (remoteCursorArray.length === 0) return null;
+    
+    return (
+      <div className="remote-cursors" style={{ 
+        position: 'absolute', 
+        top: 0, 
+        left: 0, 
+        right: 0, 
+        bottom: 0, 
+        pointerEvents: 'none' 
+      }}>
+        {remoteCursorArray.map((cursor) => {
+          // Calculate cursor position
+          const charsPerLine = 80;
+          const charWidth = 8;
+          const lineHeight = 20;
+          
+          const line = Math.floor(cursor.pos / charsPerLine);
+          const col = cursor.pos % charsPerLine;
+          
           return (
             <div 
-              key={`${cursor.clientId}-${index}`}
-              className="cursor-marker"
+              key={cursor.clientId}
+              className="remote-cursor"
               style={{
                 position: 'absolute',
-                left: `${Math.min(cursor.pos, 100) * 8}px`, // Approximate positioning
-                top: '10px',
-                backgroundColor: color,
+                left: `${col * charWidth}px`,
+                top: `${line * lineHeight}px`,
+                backgroundColor: cursor.color,
                 width: '2px',
                 height: '20px',
-                opacity: 0.7,
-                zIndex: 2
+                opacity: 0.8,
+                zIndex: 2,
+                transition: 'left 0.1s ease, top 0.1s ease'
               }}
-              title={`User: ${cursor.clientId.substring(0, 8)}`}
+              title={`User: ${cursor.name}`}
             >
               <div 
                 style={{
                   position: 'absolute',
                   top: '-20px',
                   left: '-5px',
-                  backgroundColor: color,
+                  backgroundColor: cursor.color,
                   color: 'white',
                   padding: '2px 6px',
                   borderRadius: '4px',
                   fontSize: '10px',
-                  whiteSpace: 'nowrap'
+                  whiteSpace: 'nowrap',
+                  fontWeight: 'bold'
                 }}
               >
-                {cursor.clientId.substring(0, 8)}
+                {cursor.name}
               </div>
             </div>
           );
@@ -533,6 +656,22 @@ const CollabEditor = () => {
       </div>
     );
   };
+
+  // Add CSS for blinking cursor
+  const cursorStyles = `
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
+    
+    .my-cursor {
+      animation: blink 1s infinite;
+    }
+    
+    .remote-cursor {
+      transition: left 0.1s ease, top 0.1s ease;
+    }
+  `;
 
   if (!documentId) {
     return (
@@ -552,17 +691,21 @@ const CollabEditor = () => {
     'disconnected': 'bg-danger'
   }[status] || 'bg-secondary';
   
+  const remoteCursorCount = Object.keys(remoteCursors).length;
+  
   return (
     <div className="container-fluid mt-3">
+      <style>{cursorStyles}</style>
+      
       {/* Debug Panel */}
       <div className="alert alert-info mb-3">
-        <h5 className="alert-heading">Debug Information</h5>
+        <h5 className="alert-heading">Collaborative Editor</h5>
         <div className="row">
           <div className="col-md-3">
             <strong>Document:</strong> <code>{documentId}</code>
           </div>
           <div className="col-md-3">
-            <strong>Client ID:</strong> <code>{clientIdRef.current.substring(0, 12)}...</code>
+            <strong>Your ID:</strong> <code>{clientIdRef.current.substring(0, 12)}...</code>
           </div>
           <div className="col-md-3">
             <strong>Status:</strong>
@@ -571,11 +714,16 @@ const CollabEditor = () => {
             </span>
           </div>
           <div className="col-md-3">
-            <strong>Other Users:</strong>
+            <strong>Remote Users:</strong>
             <span className="badge bg-info ms-2">
-              {otherCursors.length}
+              {remoteCursorCount}
             </span>
           </div>
+        </div>
+        <div className="mt-2">
+          <small className="text-muted">
+            Your cursor: {myCursorPos} | Version: {versionRef.current}
+          </small>
         </div>
         <hr />
         <div className="mt-2">
@@ -647,21 +795,17 @@ const CollabEditor = () => {
             <span className={`badge ${statusBadgeClass} p-2 me-2`}>
               {status === 'connected' ? '✓ CONNECTED' : status.toUpperCase()}
             </span>
-            {pendingRemoteOps.length > 0 && (
-              <span className="badge bg-warning text-dark">
-                Pending Remote: {pendingRemoteOps.length}
-              </span>
-            )}
-            {otherCursors.length > 0 && (
+            {remoteCursorCount > 0 && (
               <span className="badge bg-info">
-                {otherCursors.length} other user{otherCursors.length !== 1 ? 's' : ''}
+                {remoteCursorCount} remote user{remoteCursorCount !== 1 ? 's' : ''}
               </span>
             )}
           </div>
           
           <div className="card mb-4" style={{ position: 'relative' }}>
-            <div className="card-body p-0" style={{ position: 'relative' }}>
-              {renderOtherCursors()}
+            <div className="card-body p-0" style={{ position: 'relative', minHeight: '400px' }}>
+              {renderMyCursor()}
+              {renderRemoteCursors()}
               <textarea
                 ref={textareaRef}
                 value={content}
@@ -670,13 +814,21 @@ const CollabEditor = () => {
                   handleTextChange(e.target.value, cursorPos);
                 }}
                 onSelect={(e) => {
-                  sendCursorPosition(e.target.selectionStart);
+                  const cursorPos = e.target.selectionStart;
+                  setMyCursorPos(cursorPos);
+                  sendCursorPosition(cursorPos);
                 }}
                 onClick={(e) => {
-                  sendCursorPosition(e.target.selectionStart);
+                  const cursorPos = e.target.selectionStart;
+                  setMyCursorPos(cursorPos);
+                  sendCursorPosition(cursorPos);
                 }}
                 onKeyUp={(e) => {
-                  sendCursorPosition(e.target.selectionStart);
+                  const cursorPos = e.target.selectionStart;
+                  if (cursorPos !== myCursorPos) {
+                    setMyCursorPos(cursorPos);
+                    sendCursorPosition(cursorPos);
+                  }
                 }}
                 disabled={status !== 'connected'}
                 className="form-control border-0"
@@ -686,14 +838,16 @@ const CollabEditor = () => {
                   fontSize: '16px',
                   resize: 'vertical',
                   position: 'relative',
-                  zIndex: 1
+                  zIndex: 1,
+                  backgroundColor: '#f8f9fa',
+                  color: '#212529'
                 }}
                 placeholder={status !== 'connected' ? "Connect to the server to start editing..." : "Start typing here. Changes will sync with other users..."}
               />
             </div>
             <div className="card-footer">
               <small className="text-muted">
-                Length: {content.length} characters | Version: {versionRef.current}
+                Length: {content.length} characters | Version: {versionRef.current} | Your cursor: {myCursorPos}
               </small>
             </div>
           </div>
@@ -724,14 +878,6 @@ const CollabEditor = () => {
                 </div>
               </div>
             </div>
-            <div className="col">
-              <div className="card">
-                <div className="card-body">
-                  <h2 className="card-title">v{connectionStats.snapshotVersion}</h2>
-                  <p className="card-text text-muted">Snapshot</p>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
         
@@ -739,7 +885,7 @@ const CollabEditor = () => {
         <div className="col-lg-4">
           <div className="card bg-dark text-light" style={{ height: '500px' }}>
             <div className="card-header bg-secondary d-flex justify-content-between">
-              <h5 className="mb-0">Protocol Logs</h5>
+              <h5 className="mb-0">Logs</h5>
               <button
                 onClick={() => setLogs([])}
                 className="btn btn-sm btn-outline-light"
@@ -760,8 +906,6 @@ const CollabEditor = () => {
                         <span className="text-success">{log}</span>
                       ) : log.includes('✗') ? (
                         <span className="text-danger">{log}</span>
-                      ) : log.includes('⚠') ? (
-                        <span className="text-warning">{log}</span>
                       ) : log.includes('←') ? (
                         <span className="text-primary">{log}</span>
                       ) : (
@@ -772,10 +916,26 @@ const CollabEditor = () => {
                 )}
               </div>
             </div>
-            <div className="card-footer bg-secondary">
+            <div className="card-footer bg-secondary d-flex justify-content-between">
               <small className="text-light">
-                Version: {versionRef.current} | Seq: {seqRef.current} | Pending: {pendingOpsRef.current}
+                Pending ops: {pendingOpsRef.current}
               </small>
+              <div className="btn-group">
+                <button
+                  onClick={connect}
+                  disabled={status === 'connected' || status === 'connecting'}
+                  className="btn btn-sm btn-primary"
+                >
+                  Connect
+                </button>
+                <button
+                  onClick={disconnect}
+                  disabled={status !== 'connected'}
+                  className="btn btn-sm btn-danger"
+                >
+                  Disconnect
+                </button>
+              </div>
             </div>
           </div>
         </div>

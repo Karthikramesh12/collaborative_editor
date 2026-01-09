@@ -16,11 +16,17 @@ async function get(docId) {
 }
 
 async function canWrite(docId, userId){
+    if (userId === "__fs__"){
+        return true;
+    }
     const acl = await get(docId);
     return acl.writers.has(userId);
 }
 
 async function canRead(docId, userId){
+    if (userId === "__fs__"){
+        return true;
+    }
     const acl = await get(docId);
     return acl.readers.has(userId);
 }

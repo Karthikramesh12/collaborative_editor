@@ -47,6 +47,18 @@ class FileState {
     c.serverSeq = this.serverSeq;
     return c;
   }
+  diff(newContent){
+    if (newContent === this.content){
+      return null;
+    }
+
+    return {
+      type: "replace",
+      pos: 0,
+      length: this.content.length,
+      text: newContent
+    };
+  }
 }
 
 module.exports = FileState;

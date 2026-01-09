@@ -1,4 +1,4 @@
-import AuthComponent from "../components/authComponent"
+import AuthComponent from "../components/AuthComponent"
 
 function Auth() {
   return (

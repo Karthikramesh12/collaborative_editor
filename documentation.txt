@@ -884,5 +884,281 @@ Only now do you wire React.
 Not before.
 
 
+COLLABORATIVE DEV PLATFORM MODEL
+
+You are no longer building “a realtime editor.”
+
+You are building a remote multi-user development operating system.
+
+Everything below is deterministic and production-grade.
+
+1. Core Entities
+Project
+
+Logical product unit.
+
+Contains:
+
+repo URL or blank workspace
+
+access control rules
+
+billing / quotas
+
+linked workspace
+
+Workspace (Runtime)
+
+A running isolated compute environment.
+
+Properties:
+
+containerId
+
+mounted project volume
+
+code-server process
+
+exposed web socket endpoint
+
+lifecycle state (starting, running, stopped)
+
+One workspace = one active project runtime.
+
+User Session
+
+JWT authenticated
+
+Bound to a workspace
+
+Proxied into VS Code server
+
+No direct container access
+
+2. Control Plane vs Data Plane
+Plane	Your System	VS Code
+Control	Your backend	—
+Data (editing)	VS Code server	—
+Versioning	Your engine	—
+Recovery	Your engine	—
+Audit	Your engine	—
+
+VS Code only edits files.
+
+Your system controls reality.
+
+3. Workspace Lifecycle
+Start
+POST /workspace/start
+
+
+Validate permission
+
+Create container
+
+Mount project volume
+
+Start code-server
+
+Register workspace record
+
+Return secure gateway URL
+
+Stop
+POST /workspace/stop
+
+
+Stop container
+
+Persist snapshot
+
+Unmount volume
+
+Release resources
+
+4. Editing Flow
+VS Code edits files
+        ↓
+Filesystem watcher
+        ↓
+Your file→op bridge
+        ↓
+CollabEngine
+        ↓
+Append op log
+        ↓
+Snapshot / versioning
+
+
+This is where your existing engine is reused.
+
+5. Join Flow
+User opens workspace URL
+        ↓
+Gateway validates JWT
+        ↓
+Proxy into code-server
+        ↓
+VS Code UI loads
+        ↓
+Live Share handles cursors & presence
+
+
+No custom cursor logic anymore.
+
+6. Crash Recovery
+
+Crash → Restart → Reload snapshot → Replay op log → Workspace restored.
+
+VS Code reconnects and continues.
+
+7. Why your engine still matters
+
+VS Code has no concept of:
+
+• deterministic version history
+• audit trails
+• compliance snapshots
+• replayable logs
+• regulatory immutability
+
+Your engine provides all of that.
+
+This makes your platform enterprise-grade, not just “an editor.”
+
+
+PHASE 0 — Freeze
+
+Do not add any frontend.
+Do not add VS Code yet.
+Do not touch realtime logic.
+
+We first convert your persistence layer to workspace-correct reality.
+
+PHASE 1 — Introduce workspace layer (additive, non-breaking)
+
+Add new tables without deleting old ones.
+
+1. Add enums
+enum WorkspaceStatus {
+  ACTIVE
+  STOPPED
+  DELETED
+}
+
+enum WorkspaceRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+2. Add workspace core
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  status    WorkspaceStatus @default(ACTIVE)
+  mountPath String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner   User @relation(fields: [ownerId], references: [id])
+  members WorkspaceMember[]
+  files   File[]
+}
+
+3. Members
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole
+
+  @@unique([workspaceId, userId])
+}
+
+4. Files
+model File {
+  id          String   @id @default(cuid())
+  workspaceId String
+  path        String
+  version     Int @default(0)
+  currentHash String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+5. File logs
+model FileSnapshot {
+  id      String @id @default(cuid())
+  fileId  String
+  version Int
+  hash    String
+  content String
+  createdAt DateTime @default(now())
+
+  @@index([fileId, version])
+}
+
+model FileOperationLog {
+  id      String @id @default(cuid())
+  fileId  String
+  version Int
+  op      Json
+  createdAt DateTime @default(now())
+
+  @@index([fileId, version])
+}
+
+
+Run migration. Do not remove Document yet.
+
+PHASE 2 — Redirect collaboration core
+
+You will not touch rebasing logic.
+
+You only change storage target:
+
+Old	New
+documentId	fileId
+DocumentState	FileState
+DocumentSnapshot	FileSnapshot
+OperationLog	FileOperationLog
+
+Your engine remains identical in logic.
+
+PHASE 3 — Workspace FS mount
+
+Each workspace maps to:
+
+/mnt/workspaces/{workspaceId}/
+
+
+Files map to:
+
+/mnt/workspaces/{workspaceId}/{path}
+
+
+Snapshots hydrate files.
+Operations stream patch files.
+The DB is your history; the FS is your working tree.
+
+PHASE 4 — VS Code attachment
+
+code-server points to mountPath.
+
+Your platform now controls:
+
+• Who can open
+• Which workspace
+• Which files
+• Which users
+• Which ops are streamed
+
+VS Code becomes a terminal, not the authority.
+
+PHASE 5 — Delete Document model
+
+Only after real users are editing workspaces successfully.
 
 

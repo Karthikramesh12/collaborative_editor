@@ -1,7 +1,22 @@
+const SystemClient = new Map();
+
+
 const Client = new Map();
 
 const HEARTBEAT_TIMEOUT = 15000;
 const BySocket = new Map();
+
+function registerSystemClient(clientId){
+  if (Client.has(clientId) || SystemClient.has(clientId)){
+    return;
+  }
+
+  SystemClient.set(clientId, {
+    clientId,
+    system: true,
+    lastSeenVersion: 0
+  });
+}
 
 function register(ws, { clientId, documentId, lastSeenVersion }) {
   const meta = {
@@ -49,8 +64,12 @@ function touch(id) {
   if (c) c.lastSeenHeartBeat = Date.now();
 }
 
+function get(id){
+  return Client.get(id) || SystemClient.get(id) || null;
+}
+
 function updateVersion(id, version) {
-  const c = Client.get(id);
+  const c = Client.get(id) || SystemClient.get(id);
   if (c) c.lastSeenVersion = version;
 }
 
@@ -85,6 +104,7 @@ function pingAll() {
 setInterval(pingAll, 5000);
 
 module.exports = {
+  registerSystemClient,
   register,
   markPending,
   markLive,
@@ -93,5 +113,5 @@ module.exports = {
   updateVersion,
   unRegister,
   getBySocket,
-  get: id => Client.get(id) || null
+  get
 };
