@@ -4,17 +4,18 @@ import './DocumentManagerComponent.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 
-const DocumentManagerComponent = () => {
-  const [documents, setDocuments] = useState([]);
-  const [selectedDoc, setSelectedDoc] = useState(null);
-  const [editors, setEditors] = useState([]);
+const WorkspaceManagerComponent = () => {
+  const [workspaces, setWorkspaces] = useState([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState(null);
+  const [workspaceName, setWorkspaceName] = useState('');
   const [users, setUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [newDocTitle, setNewDocTitle] = useState('');
-  const [inviteData, setInviteData] = useState({ userId: '', role: 'EDITOR' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [inviteData, setInviteData] = useState({ userId: '', role: 'EDITOR' });
+  const [showMemberManagement, setShowMemberManagement] = useState(false);
+  const [members, setMembers] = useState([]);
   const navigate = useNavigate();
 
   const apiCall = async (endpoint, method = 'GET', body = null) => {
@@ -46,12 +47,12 @@ const DocumentManagerComponent = () => {
     }
   };
 
-  const fetchDocuments = async () => {
+  const fetchWorkspaces = async () => {
     setLoading(true);
     setError('');
     try {
-      const data = await apiCall('/doc/');
-      setDocuments(data.data || []);
+      const data = await apiCall('/workspace/');
+      setWorkspaces(data.data || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -59,17 +60,34 @@ const DocumentManagerComponent = () => {
     }
   };
 
-  const createDocument = async () => {
-    if (!newDocTitle.trim()) return;
+  const createWorkspace = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await apiCall('/workspace/', 'POST');
+      setSuccess('Workspace created successfully!');
+      fetchWorkspaces();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteWorkspace = async (workspaceId) => {
+    if (!window.confirm('Are you sure you want to delete this workspace?')) return;
 
     setLoading(true);
     setError('');
     setSuccess('');
     try {
-      await apiCall('/doc/', 'POST', { title: newDocTitle });
-      setSuccess('Document created successfully!');
-      setNewDocTitle('');
-      fetchDocuments();
+      await apiCall(`/workspace/${workspaceId}`, 'DELETE');
+      setSuccess('Workspace deleted successfully!');
+      if (selectedWorkspace === workspaceId) {
+        closeMemberManagement();
+      }
+      fetchWorkspaces();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -77,35 +95,13 @@ const DocumentManagerComponent = () => {
     }
   };
 
-  const deleteDocument = async (docId) => {
-    if (!window.confirm('Are you sure you want to delete this document?')) return;
-
-    setLoading(true);
-    setError('');
-    setSuccess('');
+  const fetchWorkspaceWithMembers = async (workspaceId) => {
     try {
-      await apiCall(`/doc/${docId}/`, 'DELETE');
-      setSuccess('Document deleted successfully!');
-      setSelectedDoc(null);
-      fetchDocuments();
+      const workspaceData = await apiCall(`/workspace/${workspaceId}`);
+      return workspaceData.data;
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchEditors = async (docId) => {
-    setLoading(true);
-    setError('');
-    try {
-      const data = await apiCall(`/doc/${docId}/editors`);
-      setEditors(data.data || []);
-      setSelectedDoc(docId);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      console.error('Error fetching workspace:', err);
+      return null;
     }
   };
 
@@ -116,29 +112,36 @@ const DocumentManagerComponent = () => {
     }
 
     try {
-      const data = await apiCall(`/user/search?q=${encodeURIComponent(query)}`);
-      setUsers(data.data || []);
+      const data = await apiCall(`/workspace/search?q=${encodeURIComponent(query)}`);
+      setUsers(Array.isArray(data.data) ? data.data : []);
     } catch (err) {
       setError(err.message);
     }
   };
 
-  const inviteEditor = async () => {
-    if (!selectedDoc || !inviteData.userId) return;
+  const inviteMember = async () => {
+    if (!selectedWorkspace || !inviteData.userId) return;
 
     setLoading(true);
     setError('');
     setSuccess('');
     try {
-      await apiCall(`/doc/${selectedDoc}/invite`, 'POST', {
-        targetUserId: inviteData.userId,
+      // Add member via API
+      await apiCall(`/workspace/${selectedWorkspace}/members`, 'POST', {
+        userId: inviteData.userId,
         role: inviteData.role
       });
-      setSuccess('Editor invited successfully!');
-      setInviteData({ userId: '', role: 'editor' });
+      
+      // Refresh the workspace data
+      const workspace = await fetchWorkspaceWithMembers(selectedWorkspace);
+      if (workspace) {
+        updateMembersFromWorkspace(workspace);
+      }
+      
+      setSuccess('Member added successfully!');
+      setInviteData({ userId: '', role: 'EDITOR' });
       setUsers([]);
       setSearchQuery('');
-      fetchEditors(selectedDoc);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -146,14 +149,25 @@ const DocumentManagerComponent = () => {
     }
   };
 
-  const updateEditorRole = async (userId, newRole) => {
+  const removeMember = async (userId) => {
+    if (!window.confirm('Are you sure you want to remove this member?')) return;
+
     setLoading(true);
     setError('');
     setSuccess('');
     try {
-      await apiCall(`/doc/${selectedDoc}/editors/${userId}`, 'PATCH', { role: newRole });
-      setSuccess('Editor role updated successfully!');
-      fetchEditors(selectedDoc);
+      await apiCall(`/workspace/${selectedWorkspace}/remove`, 'DELETE', {
+        id: selectedWorkspace,
+        userId: userId
+      });
+      
+      // Refresh the workspace data
+      const workspace = await fetchWorkspaceWithMembers(selectedWorkspace);
+      if (workspace) {
+        updateMembersFromWorkspace(workspace);
+      }
+      
+      setSuccess('Member removed successfully!');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -161,30 +175,94 @@ const DocumentManagerComponent = () => {
     }
   };
 
-  const removeEditor = async (userId) => {
-    if (!window.confirm('Are you sure you want to remove this editor?')) return;
-
+  const openWorkspace = async (workspaceId) => {
     setLoading(true);
     setError('');
-    setSuccess('');
     try {
-      await apiCall(`/doc/${selectedDoc}/editors/${userId}`, 'DELETE');
-      setSuccess('Editor removed successfully!');
-      fetchEditors(selectedDoc);
+      const data = await apiCall(`/workspace/${workspaceId}/open`);
+      if (data.data && data.data.url) {
+        window.open(data.data.url, '_blank');
+      }
     } catch (err) {
       setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateMembersFromWorkspace = (workspace) => {
+    // Based on your API response, the owner info might not be in the members array
+    // So we'll just display what's in the members array
+    const existingMembers = Array.isArray(workspace.members) ? workspace.members : [];
+    console.log('Members to display:', existingMembers);
+    setMembers(existingMembers);
+  };
+
+  const handleManageMembers = async (workspaceId, workspaceTitle) => {
+    setLoading(true);
+    setError('');
+    
+    // Find the workspace from your existing workspaces state
+    const workspace = workspaces.find(ws => ws.id === workspaceId);
+    
+    if (workspace) {
+      // SET THE STATE FIRST to show UI
+      setSelectedWorkspace(workspaceId);
+      setWorkspaceName(workspaceTitle || `Workspace ${workspaceId.slice(0, 8)}...`);
+      setShowMemberManagement(true);
+      setSearchQuery('');
+      setUsers([]);
+      setInviteData({ userId: '', role: 'EDITOR' });
+      
+      // Display members from the workspace object
+      console.log('Workspace data:', workspace);
+      console.log('Workspace members:', workspace.members);
+      
+      const existingMembers = Array.isArray(workspace.members) ? workspace.members : [];
+      console.log('Members to display:', existingMembers);
+      setMembers(existingMembers);
+    } else {
+      setError('Workspace not found');
+    }
+    
+    setLoading(false);
+  };
+
+  const closeMemberManagement = () => {
+    setShowMemberManagement(false);
+    setSelectedWorkspace(null);
+    setWorkspaceName('');
+    setUsers([]);
+    setSearchQuery('');
+    setInviteData({ userId: '', role: 'EDITOR' });
+    setMembers([]);
+  };
+
+  const refreshMembers = async () => {
+    if (!selectedWorkspace) return;
+    
+    setLoading(true);
+    setError('');
+    try {
+      const workspace = await fetchWorkspaceWithMembers(selectedWorkspace);
+      if (workspace) {
+        updateMembersFromWorkspace(workspace);
+        setSuccess('Members list refreshed!');
+      }
+    } catch (err) {
+      setError('Failed to refresh members: ' + err.message);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDocuments();
+    fetchWorkspaces();
   }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (searchQuery) {
+      if (searchQuery && searchQuery.trim()) {
         searchUsers(searchQuery);
       } else {
         setUsers([]);
@@ -194,16 +272,94 @@ const DocumentManagerComponent = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const handleManageDocument = (docId) => {
-    navigate(`/editor/${docId}`)
-  }
+  // Safely render members
+  const renderMembers = () => {
+    console.log('Current members state:', members);
+    
+    if (!Array.isArray(members)) {
+      return (
+        <div className="text-center py-4">
+          <p className="text-danger">Error: Members data is invalid</p>
+          <button 
+            className="btn btn-sm btn-outline-primary"
+            onClick={refreshMembers}
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
 
+    if (members.length === 0) {
+      return (
+        <div className="text-center py-4">
+          <p className="text-muted mb-2">No members in this workspace</p>
+          <small className="text-muted">Use the form on the left to add members</small>
+        </div>
+      );
+    }
+
+    return (
+      <div className="members-list">
+        {members.map((member, index) => {
+          // Access member properties from your API response structure
+          const userId = member.userId || `member-${index}`;
+          const role = member.role || '';
+          const userName = member.user?.name || 'Unnamed User';
+          const userEmail = member.user?.email || '';
+          const avatarUrl = member.user?.avatarUrl;
+          
+          return (
+            <div key={member.id || userId} className="member-item d-flex justify-content-between align-items-center p-3 border-bottom">
+              <div className="d-flex align-items-center">
+                {avatarUrl ? (
+                  <img 
+                    src={avatarUrl} 
+                    alt={userName} 
+                    className="avatar-small rounded-circle me-3"
+                    style={{width: '40px', height: '40px', objectFit: 'cover'}}
+                  />
+                ) : (
+                  <div className="avatar-placeholder rounded-circle me-3 d-flex align-items-center justify-content-center bg-secondary text-white"
+                       style={{width: '40px', height: '40px'}}>
+                    {userName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <div className="d-flex align-items-center">
+                    <h6 className="mb-0">{userName}</h6>
+                    {role && (
+                      <span className={`badge ${role === 'EDITOR' ? 'bg-primary' : 'bg-secondary'} ms-2`}>
+                        {role}
+                      </span>
+                    )}
+                  </div>
+                  <small className="text-muted">{userEmail}</small>
+                </div>
+              </div>
+              <div>
+                {role && role !== 'OWNER' && userId && (
+                  <button
+                    className="btn btn-sm btn-outline-danger"
+                    onClick={() => removeMember(userId)}
+                    disabled={loading}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
   return (
     <div className="document-manager">
       <div className="container-fluid">
         <div className="row">
           <div className="col-12">
-            <h1 className="main-title">Document Manager</h1>
+            <h1 className="main-title">Workspace Manager</h1>
             
             {error && (
               <div className="alert alert-danger alert-dismissible fade show" role="alert">
@@ -225,28 +381,21 @@ const DocumentManagerComponent = () => {
           <div className="col-lg-4 col-md-6 mb-4">
             <div className="card custom-card">
               <div className="card-header">
-                <h3>Create Document</h3>
+                <h3>Create Workspace</h3>
               </div>
               <div className="card-body">
                 <div className="mb-3">
-                  <label htmlFor="docTitle" className="form-label">Document Title</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    id="docTitle"
-                    value={newDocTitle}
-                    onChange={(e) => setNewDocTitle(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && createDocument()}
-                    placeholder="Enter document title"
-                  />
+                  <p className="text-muted">
+                    Create a new workspace to collaborate with others.
+                  </p>
                 </div>
                 <button 
                   type="button" 
                   className="btn btn-primary w-100" 
-                  onClick={createDocument}
+                  onClick={createWorkspace}
                   disabled={loading}
                 >
-                  {loading ? 'Creating...' : 'Create Document'}
+                  {loading ? 'Creating...' : 'Create New Workspace'}
                 </button>
               </div>
             </div>
@@ -254,44 +403,60 @@ const DocumentManagerComponent = () => {
 
           <div className="col-lg-8 col-md-6 mb-4">
             <div className="card custom-card">
-              <div className="card-header">
-                <h3>My Documents</h3>
+              <div className="card-header d-flex justify-content-between align-items-center">
+                <h3 className="mb-0">My Workspaces</h3>
+                {showMemberManagement && (
+                  <button 
+                    className="btn btn-sm btn-outline-secondary"
+                    onClick={closeMemberManagement}
+                  >
+                    Close
+                  </button>
+                )}
               </div>
               <div className="card-body">
-                {loading && documents.length === 0 ? (
+                {loading && workspaces.length === 0 ? (
                   <div className="text-center">
                     <div className="spinner-border text-primary" role="status">
                       <span className="visually-hidden">Loading...</span>
                     </div>
                   </div>
-                ) : documents.length === 0 ? (
-                  <p className="text-muted">No documents found. Create your first document!</p>
+                ) : workspaces.length === 0 ? (
+                  <p className="text-muted">No workspaces found. Create your first workspace!</p>
                 ) : (
                   <div className="document-list">
-                    {documents.map((doc) => (
-                      <div key={doc.id} className="document-item">
+                    {workspaces.map((ws) => (
+                      <div key={ws.id} className="document-item">
                         <div className="document-info">
-                          <h5>{doc.title}</h5>
+                          <h5>{ws.name || `Workspace ${ws.id.slice(0, 8)}...`}</h5>
                           <small className="text-muted">
-                            Created: {new Date(doc.createdAt).toLocaleDateString()}
+                            Created: {new Date(ws.createdAt).toLocaleDateString()}
                           </small>
+                          <div className="mt-1">
+                            <small className="text-muted">
+                              Members: {Array.isArray(ws.members) ? ws.members.length : 0}
+                            </small>
+                          </div>
                         </div>
                         <div className="document-actions">
                           <button
                             className="btn btn-sm btn-outline-primary me-2"
-                            onClick={() => handleManageDocument(doc.id)}
+                            onClick={() => openWorkspace(ws.id)}
+                            disabled={loading}
                           >
-                            Manage document
+                            Open
                           </button>
                           <button
                             className="btn btn-sm btn-outline-primary me-2"
-                            onClick={() => fetchEditors(doc.id)}
+                            onClick={() => handleManageMembers(ws.id, ws.name)}
+                            disabled={loading}
                           >
-                            Manage Editors
+                            Manage Members
                           </button>
                           <button
                             className="btn btn-sm btn-outline-danger"
-                            onClick={() => deleteDocument(doc.id)}
+                            onClick={() => deleteWorkspace(ws.id)}
+                            disabled={loading}
                           >
                             Delete
                           </button>
@@ -305,12 +470,24 @@ const DocumentManagerComponent = () => {
           </div>
         </div>
 
-        {selectedDoc && (
-          <div className="row">
+        {/* Member Management Section */}
+        {showMemberManagement && (
+          <div className="row mt-4">
+            <div className="col-12">
+              <div className="card custom-card mb-4">
+                <div className="card-header">
+                  <h3 className="mb-0">
+                    Manage Members for: <span className="text-primary">{workspaceName}</span>
+                  </h3>
+                </div>
+              </div>
+            </div>
+            
+            {/* Add Member Section */}
             <div className="col-lg-6 mb-4">
               <div className="card custom-card">
                 <div className="card-header">
-                  <h3>Invite Editor</h3>
+                  <h3>Add New Member</h3>
                 </div>
                 <div className="card-body">
                   <div className="mb-3">
@@ -321,10 +498,11 @@ const DocumentManagerComponent = () => {
                       id="userSearch"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search by name or email"
+                      placeholder="Type to search users by name or email"
+                      disabled={loading}
                     />
                     {users.length > 0 && (
-                      <div className="user-search-results">
+                      <div className="user-search-results mt-2">
                         {users.map((user) => (
                           <div
                             key={user.id}
@@ -335,9 +513,20 @@ const DocumentManagerComponent = () => {
                               setUsers([]);
                             }}
                           >
-                            <strong>{user.name || 'Unnamed User'}</strong>
-                            <br />
-                            <small className="text-muted">{user.email}</small>
+                            <div className="d-flex align-items-center">
+                              {user.avatarUrl && (
+                                <img 
+                                  src={user.avatarUrl} 
+                                  alt={user.name} 
+                                  className="avatar-small me-2"
+                                />
+                              )}
+                              <div>
+                                <strong>{user.name || 'Unnamed User'}</strong>
+                                <br />
+                                <small className="text-muted">{user.email}</small>
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -350,63 +539,58 @@ const DocumentManagerComponent = () => {
                       id="role"
                       value={inviteData.role}
                       onChange={(e) => setInviteData({ ...inviteData, role: e.target.value })}
+                      disabled={loading}
                     >
-                      <option value="editor">Editor</option>
-                      <option value="viewer">Viewer</option>
+                      <option value="EDITOR">Editor</option>
+                      <option value="VIEWER">Viewer</option>
                     </select>
                   </div>
                   <button
                     type="button"
                     className="btn btn-primary w-100"
-                    onClick={inviteEditor}
+                    onClick={inviteMember}
                     disabled={loading || !inviteData.userId}
                   >
-                    {loading ? 'Inviting...' : 'Invite Editor'}
+                    {loading ? 'Adding...' : 'Add Member'}
                   </button>
+                  
+                  {inviteData.userId && (
+                    <div className="alert alert-info mt-3 mb-0">
+                      <strong>Ready to add:</strong> {searchQuery} as {inviteData.role}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
+            {/* Members List Section */}
             <div className="col-lg-6 mb-4">
               <div className="card custom-card">
-                <div className="card-header">
-                  <h3>Document Editors</h3>
+                <div className="card-header d-flex justify-content-between align-items-center">
+                  <h3 className="mb-0">Current Members</h3>
+                  <div>
+                    <span className="badge bg-secondary me-2">
+                      {Array.isArray(members) ? members.length : 0} member(s)
+                    </span>
+                    <button 
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={refreshMembers}
+                      disabled={loading}
+                    >
+                      Refresh
+                    </button>
+                  </div>
                 </div>
                 <div className="card-body">
-                  {editors.length === 0 ? (
-                    <p className="text-muted">No editors found for this document.</p>
-                  ) : (
-                    <div className="editor-list">
-                      {editors.map((editor) => (
-                        <div key={editor.userId} className="editor-item">
-                          <div className="editor-info">
-                            <h6>{editor.userName || 'Unnamed User'}</h6>
-                            <small className="text-muted">{editor.userEmail}</small>
-                          </div>
-                          <div className="editor-controls">
-                            <select
-                              className="form-select form-select-sm me-2"
-                              value={editor.role}
-                              onChange={(e) => updateEditorRole(editor.userId, e.target.value)}
-                              disabled={editor.role === 'OWNER'}
-                            >
-                              <option value="OWNER">Owner</option>
-<option value="EDITOR">Editor</option>
-<option value="VIEWER">Viewer</option>
-
-                            </select>
-                            {editor.role !== 'OWNER' && (
-                              <button
-                                className="btn btn-sm btn-outline-danger"
-                                onClick={() => removeEditor(editor.userId)}
-                              >
-                                Remove
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                  {loading && (!Array.isArray(members) || members.length === 0) ? (
+                    <div className="text-center py-4">
+                      <div className="spinner-border text-primary" role="status">
+                        <span className="visually-hidden">Loading...</span>
+                      </div>
+                      <p className="mt-2 text-muted">Loading members...</p>
                     </div>
+                  ) : (
+                    renderMembers()
                   )}
                 </div>
               </div>
@@ -418,4 +602,4 @@ const DocumentManagerComponent = () => {
   );
 };
 
-export default DocumentManagerComponent;
+export default WorkspaceManagerComponent;

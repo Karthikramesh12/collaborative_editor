@@ -8,20 +8,19 @@ const { watchWorkspace } = require("./modules/workspace/workspace.watcher.js");
 
 registry.registerSystemClient("__fs__");
 
+const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 
-(async () => {
+server.listen(PORT, async () => {
+  console.log("Server running on port", PORT);
+
   const workspaces = await prisma.workspace.findMany();
 
   for (const ws of workspaces) {
-    await materializeWorkspace(ws.id);
-    watchWorkspace(ws.id);
-  }
+  await materializeWorkspace(ws.id);
+  await watchWorkspace(ws.id);
+}
 
-  attach(server);   // WebSocket AFTER filesystem is real
-})();
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  // LAST. Must be last. Do not move this.
+  attach(server);
 });

@@ -19,6 +19,10 @@ function remove(clientId){
     Cursor.delete(clientId);
 }
 
+function dropAll(fileId){
+    Cursor.delete(fileId);
+}
+
 setInterval(()=>{
     for(const [id, c] of Cursor.entries()){
         if(Date.now() - c.lastSeen > CURSOR_TTL){
@@ -27,4 +31,4 @@ setInterval(()=>{
     }
 }, 30_000);
 
-module.exports = { set, get, all, remove };
+module.exports = { set, get, all, remove, dropAll };

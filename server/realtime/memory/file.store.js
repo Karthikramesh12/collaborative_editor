@@ -47,6 +47,10 @@ function setFile(fileId, state) {
   fileStore.set(fileId, state);
 }
 
+function dropFile(fileId){
+  fileStore.delete(fileId);
+}
+
 setInterval(() => {
   for (const [id, f] of fileStore.entries()) {
     if (Date.now() - f.lastTouched > IDLE_TTL) {
@@ -55,4 +59,4 @@ setInterval(() => {
   }
 }, 60_000);
 
-module.exports = { getFile, setFile };
+module.exports = { getFile, setFile, dropFile };

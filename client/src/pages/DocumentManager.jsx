@@ -1,9 +1,9 @@
-import DocumentManagerComponent from '../components/DocumentMagangerComponent'
+import WorkspaceManagerComponent from '../components/DocumentMagangerComponent';
 
 function DocumentManager() {
   return (
     <div>
-      <DocumentManagerComponent/>
+      <WorkspaceManagerComponent/>
     </div>
   )
 }

@@ -1,8 +1,8 @@
 const prisma = require('../../config/prisma.js');
 
-async function save({ fileId, version, content }) {
+async function save({ fileId, version, hash, content }) {
   return prisma.fileSnapshot.create({
-    data: { fileId, version, content }
+    data: { fileId, version, hash, content }
   });
 }
 

@@ -17,4 +17,15 @@ async function since(fileId, serverSeq) {
   });
 }
 
-module.exports = { append, since };
+async function seal(fileId) {
+  await prisma.fileOplogs.updateMany({
+    where: {
+      fileId: fileId,
+    },
+    data:{
+      sealed: true
+    }
+  });
+}
+
+module.exports = { append, since, seal };

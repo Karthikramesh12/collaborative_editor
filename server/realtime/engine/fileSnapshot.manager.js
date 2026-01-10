@@ -2,7 +2,7 @@ const fileSnapshotRepo = require('../persistence/fileSnapshot.repo.js');
 const fileStore = require('../memory/file.store.js');
 const fileOpLogRepo = require('../persistence/fileOpLog.repo.js');
 const Filestate = require('./file.state.js');
-const { file } = require('../../config/prisma.js');
+const Crypto = require("crypto");
 
 const SNAP_INTERVAL = 100;
 
@@ -44,4 +44,15 @@ async function loadOrCreate(fileId){
   return temp;
 }
 
-module.exports = { maybeSnapShot, loadOrCreate };
+async function forceSnapshot(file){
+  const hash = Crypto.createHash("sha1").update(file.content).digest("hex");
+
+  await fileSnapshotRepo.save({
+    fileId: file.fileId,
+    version: file.serverSeq,
+    hash,
+    content: file.content,
+  });
+}
+
+module.exports = { maybeSnapShot, loadOrCreate, forceSnapshot };

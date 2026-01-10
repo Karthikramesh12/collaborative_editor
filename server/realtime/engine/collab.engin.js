@@ -146,6 +146,19 @@ if (!client) {
       await this.submitOperation(fileId, gaurded, '__fs__');
     }
   }
+
+  async dropFile(fileId){
+    const doc = await store.getFile(fileId);
+
+    if (!doc){
+      return;
+    }
+
+    await snapper.forceSnapshot(doc);
+    await opLogRepo.seal(fileId);
+    store.dropFile(fileId);
+    Cursor.dropAll(fileId);
+  }
 }
 
 module.exports = new CollabEngine();
