@@ -89,18 +89,21 @@ model OperationLog {
 }
 
 model Workspace {
-  id                String    @id  @default(cuid())
-  name              String
-  ownerId           String
-  status            WorkspaceStaus @default(ACTIVE)
-  mountPath         String
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  id        String @id @default(cuid())
+  name      String
+  ownerId   String
+  status    WorkspaceStaus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  owner             User           @relation("OwnerWorkspace", fields: [ownerId], references: [id])
-  members           WorkspaceMember[]
-  files             File[]
+  codePort  Int?
+  containerName String?
+
+  owner   User     @relation("OwnerWorkspace", fields: [ownerId], references: [id])
+  members WorkspaceMember[]
+  fs      File[]
 }
+
 
 model WorkspaceMember {
   id                      String    @id  @default(cuid())
@@ -115,44 +118,53 @@ model WorkspaceMember {
 }
 
 model File {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   workspaceId String
-  path        String
-  version     Int       @default(0)
-  currentHash String
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  parentId    String?
+  name        String
+  type        FsType
 
-  fileSnapshot  FileSnapshot[]
-  fileOpLogs    FileOplogs[]
+  content     String   @db.Text
+  version     Int      @default(0)
 
-  @@unique([workspaceId, path])
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent      File?     @relation("Tree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    File[]    @relation("Tree")
+
+  snapshots   FileSnapShot[]
+  oplogs      FileOpLog[]
+
+  @@unique([workspaceId, parentId, name])
 }
 
-model FileSnapshot {
-  id              String  @id @default(cuid())
-  fileId          String
-  version         Int
-  hash            String
-  content         String
-  createdAt       DateTime    @default(now())
+model FileSnapShot {
+  id        String @id @default(cuid())
+  fileId    String
+  version   Int
+  content   String
+  createdAt DateTime @default(now())
 
-  file            File        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
   @@index([fileId, version])
 }
 
-model FileOplogs {
-  id                String    @id  @default(cuid())
-  fileId            String
-  serverSeq         Int
-  op                Json
-  sealed            Boolean        @default(false)
-  createdAt         DateTime       @default(now())
+model FileOpLog {
+  id        String @id @default(cuid())
+  fileId    String
+  serverSeq Int
+  op        Json
+  createdAt DateTime @default(now())
 
-  file              File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  file File @relation(fields: [fileId], references: [id], onDelete: Cascade)
 
   @@unique([fileId, serverSeq])
+}
+
+enum FsType {
+  FILE
+  DIR
 }
 
 enum EditorRole {

@@ -1,7 +1,7 @@
 const prisma = require('../../config/prisma.js');
 
 async function append(fileId, entry) {
-  return prisma.fileOplogs.create({
+  return prisma.fileOpLog.create({
     data: {
       fileId,
       serverSeq: entry.serverSeq,
@@ -11,14 +11,14 @@ async function append(fileId, entry) {
 }
 
 async function since(fileId, serverSeq) {
-  return prisma.fileOplogs.findMany({
+  return prisma.fileOpLog.findMany({
     where: { fileId, serverSeq: { gt: serverSeq } },
     orderBy: { serverSeq: 'asc' }
   });
 }
 
 async function seal(fileId) {
-  await prisma.fileOplogs.updateMany({
+  await prisma.fileOpLog.updateMany({
     where: {
       fileId: fileId,
     },

@@ -1162,3 +1162,236 @@ PHASE 5 — Delete Document model
 Only after real users are editing workspaces successfully.
 
 
+**Why VS Code / code-server Cannot Be Used for a Real Collaborative IDE**
+
+VS Code (and code-server) cannot be used as the foundation of a real multi-user collaborative IDE.
+It was never designed for it and is structurally hostile to it.
+
+This is not an implementation gap.
+This is a core architecture limitation.
+
+1. VS Code is single-writer by design
+
+VS Code assumes:
+
+• One human
+• One UI
+• One filesystem
+• One cursor authority
+• One writer
+
+Every core subsystem is built on this assumption.
+
+There is no concept of shared document authority in VS Code’s architecture.
+
+2. Disk is the source of truth
+
+VS Code uses:
+
+Editor Buffer → Disk → File Watcher → Reload
+
+
+Meaning:
+
+• Any external write is treated as “foreign corruption”
+• VS Code tries to rebase local buffers on disk diffs
+• This breaks cursor positions, undo stacks, and change streams
+
+The moment two users write concurrently, the editor fights itself.
+
+3. Cursor rebasing is not programmable
+
+VS Code rebases cursors internally with no interception layer.
+
+You cannot inject your own CRDT/OT cursor model.
+You cannot override buffer authority.
+You cannot make your engine authoritative.
+
+Your system will always be subordinate — and will always lose.
+
+4. File watchers destroy multi-user correctness
+
+VS Code file watchers are designed for:
+
+• Build tools
+• Git
+• Linting
+• Local compilers
+
+Not multi-writer collaboration.
+
+They actively corrupt concurrent edits.
+
+5. code-server inherits all of this
+
+code-server is only VS Code in a browser.
+It does not change the editor kernel.
+
+So every concurrency flaw remains.
+
+6. You cannot “patch” this away
+
+You would have to:
+
+• Replace the document model
+• Replace the cursor model
+• Replace undo/redo
+• Replace the file watcher
+• Replace FS authority
+• Replace editor kernel
+
+At that point, you are rewriting VS Code.
+
+7. This is why cloud IDEs do NOT use VS Code kernel
+
+Gitpod
+Eclipse Che
+Red Hat DevSpaces
+Coder Workspaces
+JetBrains Fleet (cloud mode)
+
+They all use Theia-class architectures — not VS Code kernel.
+
+Bottom line
+
+VS Code is a local single-writer editor.
+Trying to turn it into a collaborative IDE will always result in:
+
+• Merge corruption
+• Cursor desync
+• Undo corruption
+• Lost writes
+• Phantom diffs
+• Random reload prompts
+
+These are not bugs.
+They are architectural.
+
+
+What You Use
+Layer	Choice
+UI IDE	Eclipse Theia
+Terminal / FS	Docker container
+Language services	LSP servers
+Your Collab Engine	Authority layer
+Disk	Append-only snapshot store
+Phase 1 — Replace VS Code with Theia
+
+Do not use VS Code or code-server.
+
+Use:
+
+theia/theia-full
+
+
+This is the same stack used by Gitpod, Che, RedHat DevSpaces.
+
+Phase 2 — Make Your Engine Authoritative
+
+Your system becomes:
+
+Browser Theia
+    ↓
+Your Collaboration Gateway
+    ↓
+CRDT / OT Core
+    ↓
+Disk Snapshots
+
+
+Theia becomes read/write relay only.
+
+Phase 3 — Disable Local FS Authority
+
+In Theia:
+
+• Disable file watcher reloads
+• Disable file dirty conflict popups
+• Disable buffer rebasing
+• Disable native FS writes
+
+Your engine handles all writes.
+
+Theia only requests:
+
+OPEN
+CHANGE
+SAVE
+
+
+You decide when disk is written.
+
+Phase 4 — Replace Theia FileSystem with Remote Provider
+
+Mount a virtual FS:
+
+theia.filesystem.remote
+
+
+Point it to:
+
+/api/workspace/:id/fs/*
+
+
+Which routes to your engine.
+
+Theia now sees your engine as “the disk”.
+
+Phase 5 — Inject Your Collab Protocol
+
+Implement:
+
+API	Purpose
+OPEN	Fetch doc state
+PATCH	Apply CRDT delta
+CURSOR	Cursor updates
+SAVE	Snapshot flush
+
+Theia editor simply renders your CRDT document.
+
+Phase 6 — Terminals, Git, Builds
+
+Run everything inside the workspace container:
+
+Docker Workspace Container
+ ├── LSP Servers
+ ├── Git
+ ├── Build tools
+ └── Terminal
+
+
+Expose through Theia.
+
+Phase 7 — Snapshots & Recovery
+
+Your engine periodically snapshots:
+
+• Files
+• Cursor state
+• Undo logs
+• Operation logs
+
+Crash = replay logs.
+
+Phase 8 — Security & Multi-Tenancy
+
+Workspace container per workspace
+Reverse proxy routes to correct Theia instance.
+
+Result
+
+You now have:
+
+• True multi-cursor editing
+• No merge conflicts
+• No rebase corruption
+• Deterministic state
+• Real cloud IDE
+
+What You Do NOT Do
+
+• Do not mount host disk directly
+• Do not allow Theia to write files
+• Do not let file watchers control authority
+
+This architecture is what Gitpod and Che use.

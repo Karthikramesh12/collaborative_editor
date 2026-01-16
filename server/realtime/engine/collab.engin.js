@@ -69,7 +69,7 @@ if (!client) {
 
     await snapper.maybeSnapShot(doc);
 
-    await persistToDisk(documentId, doc.content);
+    // await persistToDisk(documentId, doc.content);
 
     // 6 — BROADCAST
     const cursors = Cursor.all(documentId);

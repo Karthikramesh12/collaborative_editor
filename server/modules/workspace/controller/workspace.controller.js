@@ -1,6 +1,5 @@
 const { createWorkspace, deleteWorkspace } = require('../service/workspace.service.js');
 const prisma = require('../../../config/prisma.js');
-const { ensureVscode } = require("../workspace.vscode.js");
 
 async function createWS(req, res){
     try{
@@ -68,8 +67,6 @@ async function openWorkspace(req, res) {
         if (!isOwner && !isMember) {
             return res.status(403).json({ success: false, message: "access denied" });
         }
-
-        const server = await ensureVscode(ws.id, ws.mountPath);
 
         return res.status(200).json({
             success: true,

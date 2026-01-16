@@ -1,9 +1,6 @@
 const prisma = require("../../../config/prisma.js");
 const fs = require("fs/promises");
 const path = require("path");
-const { materializeWorkspace } = require("../workspace.bootstrap.js");
-const { watchWorkspace } = require("../workspace.watcher.js");
-const { stopVsCode } = require("../workspace.vscode.js");
 
 const ROOT = '/home/karthik/workspaces';
 
@@ -22,9 +19,7 @@ async function createWorkspace(ownerId, name){
     data:{ mountPath }
   });
 
-  // mountPath is now valid everywhere
-  await materializeWorkspace(ws.id);
-  await watchWorkspace(ws.id);   // critical – attach live filesystem
+  // mountPath is now valid everywhere// critical – attach live filesystem
 
   return updated;
 }
@@ -32,9 +27,6 @@ async function createWorkspace(ownerId, name){
 async function deleteWorkspace(workspaceId) {
     const ws = await prisma.workspace.findUnique({ where:{ id: workspaceId }});
     if (!ws) return;
-
-    // 1. Stop VSCode server
-    stopVsCode(workspaceId);
 
     // 2. Remove all workspace dependent rows
     await prisma.$transaction([
